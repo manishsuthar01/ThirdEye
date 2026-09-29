@@ -1,36 +1,130 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 👁️ ThirdEye (DevPulse)
 
-## Getting Started
+> **Deployment Observability & Incident Correlation Platform**  
+> Answer the critical question: *"Did our latest deployment cause these errors?"*
 
-First, run the development server:
+---
+
+## 📖 Overview
+
+**ThirdEye** is a developer-centric platform designed to bridge the gap between **code deployments** and **production application health**. 
+
+Modern applications rarely break in a vacuum—production incidents are overwhelmingly triggered by recent code pushes, migrations, or configuration releases. ThirdEye monitors your deployments from GitHub and Vercel, ingests application errors, and automatically correlates error spikes to the exact commit, author, and deployment that caused them.
+
+---
+
+## ✨ Key Features
+
+- **🔗 Zero-SDK Integrations**: Connects seamlessly with GitHub (commits, PRs) and Vercel (deployments, environments) via real-time webhooks.
+- **⚡ Fast-Ingestion Architecture**: Webhook endpoints validate and enqueue events in milliseconds, preventing webhook timeouts.
+- **🧠 Intelligent Correlation Engine**: Analyzes time windows, routes, and error spikes to tie production incidents to suspect deployments.
+- **⏱️ Unified Event Timeline**: A chronological real-time stream showing deployments, error surges, and incident triggers side-by-side.
+- **📦 Deduplication & Fingerprinting**: Normalizes stack traces and groups high-frequency duplicate errors automatically.
+- **🔔 Actionable Alerts**: Dispatches rich incident notifications with the offending commit SHA, author, and route.
+
+---
+
+## 🏗️ Architecture at a Glance
+
+```
+GitHub / Vercel Webhooks
+           │
+           ▼
+    ThirdEye API (Node.js)  ──► Fast Validate & 200 OK
+           │
+           ▼
+  Message Queue (BullMQ + Redis)
+     │            │            │
+     ▼            ▼            ▼
+[Deployment]   [Error]   [Correlation]
+   Worker      Worker        Worker
+     │            │            │
+     └────────────┬────────────┘
+                  ▼
+         PostgreSQL (Source of Truth)
+                  │
+             Redis (Cache & Pub/Sub)
+                  │
+                  ▼
+       Next.js / React Dashboard
+```
+
+> 📘 **Full Architecture & System Design**: Read the comprehensive architecture documentation in [architecture.md](architecture.md).
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | [Next.js](https://nextjs.org) (App Router), [React](https://react.dev), [TailwindCSS](https://tailwindcss.com) |
+| **API & Ingestion** | Node.js, TypeScript |
+| **Queue & Workers** | [BullMQ](https://bullmq.io), [Redis](https://redis.io) |
+| **Database** | [PostgreSQL](https://www.postgresql.org) |
+| **Cache & Pub/Sub** | [Redis](https://redis.io) |
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+Ensure you have the following installed locally:
+- **Node.js** (v20+ recommended)
+- **npm**, **pnpm**, or **yarn**
+- **Docker** (optional, for running local PostgreSQL & Redis containers)
+
+### 1. Clone & Install Dependencies
+
+```bash
+git clone https://github.com/manishsuthar01/ThirdEye.git
+cd ThirdEye
+npm install
+```
+
+### 2. Configure Environment Variables
+
+Create a `.env.local` file in the root directory:
+
+```env
+# App
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thirdeye
+
+# Redis & Queue
+REDIS_URL=redis://localhost:6379
+
+# GitHub & Vercel Webhook Secrets
+GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
+VERCEL_WEBHOOK_SECRET=your_vercel_webhook_secret
+```
+
+### 3. Run the Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser to view the application.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🗺️ Implementation Roadmap
 
-## Learn More
+- [x] **Phase 1**: Project initialization & System Architecture ([architecture.md](architecture.md))
+- [ ] **Phase 2**: Authentication & Project Management
+- [ ] **Phase 3**: GitHub Integration (Commits & PR sync)
+- [ ] **Phase 4**: Vercel Integration (Deployment events)
+- [ ] **Phase 5**: Webhook Ingestion & BullMQ Queue pipeline
+- [ ] **Phase 6**: Specialized Background Worker Fleet
+- [ ] **Phase 7**: Unified Deployment & Error Timeline UI
+- [ ] **Phase 8**: Automated Deployment ↔ Error Correlation Engine
+- [ ] **Phase 9**: Incident Alerts (Discord, Slack, Email)
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📄 License
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is licensed under the MIT License.
