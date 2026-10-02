@@ -1,26 +1,21 @@
 {
-  "name": "devpluse",
+  "name": "thirdeye",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.6",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev:web": "pnpm --filter @thirdeye/web dev",
+    "dev:api": "pnpm --filter @thirdeye/api dev",
+    "dev:worker": "pnpm --filter @thirdeye/worker dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r exec rm -rf dist .next node_modules"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.6",
-    "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.0"
 }
