@@ -95,16 +95,24 @@ ThirdEye bridges the gap between **code deployments and application health**:
 
 ---
 
-### 3.3. Asynchronous Queue Layer
-- **Tech Stack**: BullMQ backed by Redis (or RabbitMQ).
-- **Purpose**: Decouples webhook ingress from analytical processing, providing backpressure handling, retry mechanisms, and concurrency control.
-- **Standard Job Types**:
-  - `deployment.received`: Raw deployment event from Vercel/CI.
-  - `github.commit.received`: Commit and PR metadata from GitHub.
-  - `error.received`: Ingestion of an error or exception log.
-  - `analyze.deployment`: Trigger post-deployment health checks.
-  - `correlate.error`: Run incident detection algorithms.
-  - `send.notification`: Dispatch alert messages.
+### 3.3. Asynchronous Message Broker Layer (RabbitMQ)
+- **Tech Stack**: RabbitMQ (AMQP 0-9-1 protocol, `amqplib` client).
+- **Purpose**: Decouples webhook ingress from analytical processing, providing flexible topic-based routing, guaranteed delivery with manual acknowledgments (`ack`/`nack`), backpressure handling (`basic.qos`), and dead-letter safety.
+- **AMQP 0-9-1 Topology & Routing**:
+  - **Exchanges**:
+    - `thirdeye.events.topic` (Topic Exchange): Central exchange where all ingress events are published.
+  - **Routing Key Hierarchy**:
+    - `deployment.vercel.created` / `deployment.vercel.succeeded` / `deployment.vercel.error`
+    - `github.push` / `github.pull_request`
+    - `error.runtime` / `error.http500`
+    - `incident.detected`
+  - **Queues & Worker Bindings**:
+    - `deployment_processing_queue`: Bound to `deployment.*` and `github.*`
+    - `error_processing_queue`: Bound to `error.*`
+    - `correlation_processing_queue`: Bound to `deployment.*` and `error.*`
+    - `notifications_queue`: Bound to `incident.*`
+  - **Reliability & Dead Lettering**:
+    - `thirdeye.dlx` (Dead Letter Exchange) and `failed_events_dlq` to capture rejected/poison-pill messages for inspection.
 
 ---
 
@@ -146,13 +154,11 @@ PostgreSQL acts as the single source of truth for all relational entities:
 
 ---
 
-### 3.6. Ephemeral & In-Memory Layer (Redis)
-Redis is leveraged exclusively for transient, high-speed workloads:
-- **Queue Engine**: BullMQ job state, concurrency control, and delayed retry scheduling.
-- **Dashboard Cache**: Caching heavy aggregation queries (e.g., 24h error graphs).
-- **Webhook Deduplication**: Short-lived keys to reject duplicate webhook deliveries (`Idempotency-Key` or event ID).
-- **Rate Limiting**: Sliding window counters protecting ingestion endpoints.
-- **Pub/Sub**: Real-time event broadcasting to push live updates to the frontend dashboard.
+### 3.6. Streamlined Infrastructure (No Redis Needed in V1)
+By replacing BullMQ with RabbitMQ, the architecture eliminates the operational requirement for Redis in V1:
+- **Brokerage & Queuing**: RabbitMQ natively provides message persistence, consumer queues, topic routing, and backpressure without needing Redis as an intermediary engine.
+- **Idempotency & Deduplication**: PostgreSQL unique constraints (e.g. `event_id` or `idempotency_key` on webhook records) provide ACID-compliant deduplication.
+- **Result**: Leaner local footprint (only PostgreSQL + RabbitMQ containers required).
 
 ---
 
@@ -186,10 +192,10 @@ Developer pushes code & triggers Vercel deployment
 Vercel dispatches `deployment.succeeded` webhook
            │
            ▼
-ThirdEye API validates signature & pushes job to BullMQ
+ThirdEye API validates signature & publishes to RabbitMQ
            │
            ▼
-Deployment Worker saves deployment to PostgreSQL & warms Redis cache
+Deployment Worker saves deployment to PostgreSQL
            │
            ▼
 Runtime errors occur on newly deployed service
@@ -201,7 +207,7 @@ Error Worker groups errors & notices anomaly
 Correlation Worker matches error window with Deployment #182
            │
            ▼
-Incident generated in PostgreSQL & broadcasted via Redis Pub/Sub
+Incident generated in PostgreSQL
            │
            ▼
 Dashboard updates in real-time & Notification Worker alerts the team
@@ -217,7 +223,7 @@ Dashboard updates in real-time & Notification Worker alerts the team
 | **Phase 2** | **GitHub Integration** | GitHub App / OAuth, repo selection, commit & PR sync. |
 | **Phase 3** | **Vercel Integration** | Vercel OAuth, deployment webhook setup, project mapping. |
 | **Phase 4** | **Webhook Ingestion** | High-throughput signature verification, idempotency, raw payload logging. |
-| **Phase 5** | **Queue & Workers** | BullMQ setup on Redis, worker isolation, retry strategies. |
+| **Phase 5** | **Message Broker & Workers** | RabbitMQ broker setup, exchange topology, worker bindings, and dead-letter safety. |
 | **Phase 6** | **Deployment Timeline** | Next.js timeline UI rendering deployments with Git commit context. |
 | **Phase 7** | **Error Ingestion & Grouping** | Ingestion endpoint, stack trace parsing, error fingerprinting. |
 | **Phase 8** | **Correlation Engine** | Time-window algorithms linking error rate spikes to deployment events. |

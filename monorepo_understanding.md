@@ -67,7 +67,7 @@ thirdeye/
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   ├── queue/                            ← Redis/BullMQ queue definitions
+│   ├── queue/                            ← RabbitMQ broker definitions & contracts
 │   │   ├── src/
 │   │   │   └── index.ts
 │   │   ├── package.json
@@ -96,7 +96,7 @@ thirdeye/
 │
 ├── .env.example                          ← Environment variable template
 ├── .gitignore                            ← Git exclusions
-├── docker-compose.yml                    ← Local Postgres + Redis
+├── docker-compose.yml                    ← Local Postgres + RabbitMQ
 ├── package.json                          ← Root workspace config
 ├── pnpm-workspace.yaml                   ← Monorepo definition
 ├── tsconfig.base.json                    ← Shared TypeScript settings
@@ -506,8 +506,8 @@ Here's the complete data flow through ThirdEye:
 | Connection | Technology | Which Package Manages It |
 |---|---|---|
 | API ↔ Database | PostgreSQL (TCP) | `packages/database/` |
-| API → Queue | Redis (TCP) | `packages/queue/` |
-| Queue → Worker | Redis (TCP) | `packages/queue/` |
+| API → Queue | RabbitMQ (AMQP) | `packages/queue/` |
+| Queue → Worker | RabbitMQ (AMQP) | `packages/queue/` |
 | Worker ↔ Database | PostgreSQL (TCP) | `packages/database/` |
 | Web ↔ Database | PostgreSQL (TCP) | `packages/database/` |
 | Web → API | HTTP (REST) | `apps/web/lib/` (API client) |
@@ -528,7 +528,7 @@ Here's the complete data flow through ThirdEye:
 | `tsconfig.base.json` | Shared TypeScript settings | All apps/packages (at compile time) | Config |
 | `.env.example` | Documents required env vars | New developers | Config (template) |
 | `.gitignore` | Prevents junk from entering Git | Git | Config |
-| `docker-compose.yml` | Runs Postgres and Redis locally | Developers (via Docker) | Config |
+| `docker-compose.yml` | Runs Postgres and RabbitMQ locally | Developers (via Docker) | Config |
 | `README.md` | Project overview | Humans | Documentation |
 | `architecture.md` | Architecture decisions | Humans | Documentation |
 
@@ -575,7 +575,7 @@ Here's the complete data flow through ThirdEye:
 | Package | What Problem It Solves | Who Uses It | Config or Code? |
 |---|---|---|---|
 | `database/` | Single source of truth for DB access | API, Worker, Web | Code (library) |
-| `queue/` | Shared job contracts and queue setup | API (producer), Worker (consumer) | Code (library) |
+| `queue/` | RabbitMQ connection, exchange topology, and message contracts | API (publisher), Worker (consumer) | Code (library) |
 | `analysis/` | Code review logic | Worker (primarily) | Code (library) |
 | `types/` | Shared TypeScript interfaces | All apps and packages | Code (types only) |
 
@@ -646,7 +646,7 @@ A module is a **sub-section within an app**, organized by domain/feature. Unlike
 │   │  Shared toolboxes that apps reach into:                │     │
 │   │                                                        │     │
 │   │  🗄️  database = how to talk to PostgreSQL              │     │
-│   │  📬 queue    = how to pass jobs between API & worker   │     │
+│   │  📬 queue    = how to pass messages (RabbitMQ broker)  │     │
 │   │  🔬 analysis = the code review brain                   │     │
 │   │  📝 types    = shared vocabulary (TypeScript types)    │     │
 │   └────────────────────────────────────────────────────────┘     │

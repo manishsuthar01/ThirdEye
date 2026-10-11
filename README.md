@@ -33,7 +33,8 @@ GitHub / Vercel Webhooks
     ThirdEye API (Node.js)  ──► Fast Validate & 200 OK
            │
            ▼
-  Message Queue (BullMQ + Redis)
+    Message Broker (RabbitMQ)
+     (Exchanges & Routing Keys)
      │            │            │
      ▼            ▼            ▼
 [Deployment]   [Error]   [Correlation]
@@ -59,9 +60,8 @@ GitHub / Vercel Webhooks
 | :--- | :--- |
 | **Frontend** | [Next.js](https://nextjs.org) (App Router), [React](https://react.dev), [TailwindCSS](https://tailwindcss.com) |
 | **API & Ingestion** | Node.js, TypeScript |
-| **Queue & Workers** | [BullMQ](https://bullmq.io), [Redis](https://redis.io) |
+| **Message Broker & Workers** | [RabbitMQ](https://www.rabbitmq.com) (AMQP 0-9-1, `amqplib`), Background Workers |
 | **Database** | [PostgreSQL](https://www.postgresql.org) |
-| **Cache & Pub/Sub** | [Redis](https://redis.io) |
 
 ---
 
@@ -72,7 +72,7 @@ GitHub / Vercel Webhooks
 Ensure you have the following installed locally:
 - **Node.js** (v20+ recommended)
 - **npm**, **pnpm**, or **yarn**
-- **Docker** (optional, for running local PostgreSQL & Redis containers)
+- **Docker** (optional, for running local PostgreSQL and RabbitMQ containers)
 
 ### 1. Clone & Install Dependencies
 
@@ -93,8 +93,8 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 # Database
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thirdeye
 
-# Redis & Queue
-REDIS_URL=redis://localhost:6379
+# RabbitMQ (Message Broker)
+RABBITMQ_URL=amqp://thirdeye:thirdeye@localhost:5672
 
 # GitHub & Vercel Webhook Secrets
 GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
@@ -117,7 +117,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser to view the 
 - [ ] **Phase 2**: Authentication & Project Management
 - [ ] **Phase 3**: GitHub Integration (Commits & PR sync)
 - [ ] **Phase 4**: Vercel Integration (Deployment events)
-- [ ] **Phase 5**: Webhook Ingestion & BullMQ Queue pipeline
+- [ ] **Phase 5**: Webhook Ingestion & RabbitMQ Pipeline
 - [ ] **Phase 6**: Specialized Background Worker Fleet
 - [ ] **Phase 7**: Unified Deployment & Error Timeline UI
 - [ ] **Phase 8**: Automated Deployment ↔ Error Correlation Engine
