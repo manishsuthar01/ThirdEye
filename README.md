@@ -50,7 +50,10 @@ GitHub / Vercel Webhooks
        Next.js / React Dashboard
 ```
 
-> 📘 **Full Architecture & System Design**: Read the comprehensive architecture documentation in [architecture.md](architecture.md).
+> 📘 **Architectural Deep-Dives & Engineering Guides**:
+> - [System Design & Architecture Spec](architecture.md)
+> - [Monorepo Guide & Architectural Trade-offs](MONOREPO_GUIDE.md)
+> - [Distributed Systems Edge Cases & Failure Modes](EDGE_CASES.md)
 
 ---
 
