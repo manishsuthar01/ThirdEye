@@ -17,4 +17,9 @@ export const config = {
     clientId: process.env.GITHUB_APP_CLIENT_ID || "",
     clientSecret: process.env.GITHUB_APP_CLIENT_SECRET || "",
   },
+  rabbitmq: {
+    url: process.env.RABBITMQ_URL || "amqp://thirdeye:thirdeye@localhost:5672",
+    exchange: process.env.RABBITMQ_EXCHANGE || "thirdeye.events",
+    dlxExchange: process.env.RABBITMQ_DLX_EXCHANGE || "thirdeye.dlx",
+  },
 };

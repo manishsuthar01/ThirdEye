@@ -13,8 +13,8 @@ export class QueueManager {
     private channel!: Channel;
     constructor(
         private url: string = process.env.RABBITMQ_URL || "amqp://thirdeye:thirdeye@localhost:5672",
-        private exchange: string = "thirdeye.events",
-        private dlxExchange: string = "thirdeye.dlx"
+        private exchange: string = process.env.RABBITMQ_EXCHANGE || "thirdeye.events",
+        private dlxExchange: string = process.env.RABBITMQ_DLX_EXCHANGE || "thirdeye.dlx"
     ) { }
 
     private readonly SYSTEM_QUEUES = [
@@ -139,59 +139,3 @@ export class QueueManager {
 export const createQueueManager = () => {
     return new QueueManager()
 }
-
-
-
-
-
-// // 1. Define the TypeScript type for our dummy deployment event
-// interface DeploymentEvent {
-//     deploymentId: string;
-//     project: string;
-//     environment: "production" | "preview";
-//     commitSha: string;
-//     author: string;
-//     status: "BUILDING" | "READY" | "ERROR";
-//     timestamp: string;
-// }
-
-// async function main() {
-//     const queueManager = createQueueManager();
-//     // initialize all the required exchanges and queues
-//     await queueManager.start();
-
-//     // 2. Register the consumer on "deployments_queue"
-//     await queueManager.createConsumer<DeploymentEvent>(
-//         "deployments_queue",
-//         "deployment.#",
-//         async (data) => {
-//             console.log("\n🎉 [Worker Received Deployment Event]:", {
-//                 id: data.deploymentId,
-//                 project: data.project,
-//                 env: data.environment,
-//                 commit: data.commitSha,
-//                 status: data.status,
-//             });
-//         }
-//     );
-
-//     // 3. Create a realistic dummy deployment payload
-//     const dummyDeployment: DeploymentEvent = {
-//         deploymentId: "dep_live_98765",
-//         project: "thirdeye-web",
-//         environment: "production",
-//         commitSha: "a1b2c3d4",
-//         author: "manish",
-//         status: "READY",
-//         timestamp: new Date().toISOString(),
-//     };
-
-//     // 4. Publish the event with routing key "deployment.vercel.succeeded"
-//     console.log("🚀 [API Publishing Deployment Event] ->", dummyDeployment.deploymentId);
-//     for (let i = 0; i < 500; i++) {
-//         await queueManager.publishEvent("deployment.vercel.succeeded", dummyDeployment);
-//     }
-// }
-
-// main().catch(console.error);
-
