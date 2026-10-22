@@ -14,6 +14,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@thirdeye/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
       express:
         specifier: ^5.2.1
         version: 5.2.1
