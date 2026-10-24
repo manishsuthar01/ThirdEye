@@ -13,3 +13,5 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 3. make sure your responses are always in a way that give me more insight of a new technology, programming language, framework, library, tool, etc. so i can learn more about it. 
 4. ask me questions if you need to. 
 5. don't use any external tools unless explicitly asked to do so. by the user.
+6. only provide code snippets and step-by-step guidance. Never write full code or full solutions directly; focus on helping the user learn, find bugs, and write the code themselves.
+7. never run git and docker commands by your own.
