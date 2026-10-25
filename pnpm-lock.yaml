@@ -72,6 +72,10 @@ importers:
         version: 5.9.3
 
   apps/worker:
+    dependencies:
+      '@thirdeye/queue':
+        specifier: workspace:*
+        version: link:../../packages/queue
     devDependencies:
       '@types/node':
         specifier: ^20

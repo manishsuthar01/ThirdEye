@@ -8,7 +8,9 @@
     "start": "node dist/worker.js",
     "lint": "eslint src/"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@thirdeye/queue": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^20",
     "tsx": "^4",

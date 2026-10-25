@@ -7,7 +7,6 @@
  * Shared between the API (producer) and worker (consumer).
  */
 import amqp, { ChannelModel, Channel, ConsumeMessage } from "amqplib";
-
 export class QueueManager {
     private connection!: ChannelModel;
     private channel!: Channel;
@@ -100,12 +99,10 @@ export class QueueManager {
         await this.channel.bindQueue(q, this.exchange, routingKey);
         console.log("✅ [QueueManager] Created consumer for queue '%s' with routing key '%s'", queueName, routingKey);
 
-        // setup the consumer
         this.channel.consume(q, async (msg) => {
             if (!msg) return
 
             try {
-
                 const parseData = JSON.parse(msg.content.toString()) as T;
 
                 // run the worker business logic now
@@ -139,3 +136,4 @@ export class QueueManager {
 export const createQueueManager = () => {
     return new QueueManager()
 }
+export type { ConsumeMessage } from "amqplib";
