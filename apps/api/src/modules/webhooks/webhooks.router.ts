@@ -9,10 +9,6 @@ const webhookRouter: Router = Router();
 
 webhookRouter.post(
     "/github",
-    (req, res, next) => {
-        console.log("github webhook is called")
-        next()
-    },
     verifyGitHubWebHook,
     createWebhookHandler(githubAdapter)
 );
