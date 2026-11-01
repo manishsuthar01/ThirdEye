@@ -1,11 +1,10 @@
 import type { NormalizedWebhookEvent } from "../types/webHookEvent";
-import { queueManager } from "../lib/queue";
 import type { ConsumeMessage } from "@thirdeye/queue";
 
-import { analyzeCommitJob } from "../jobs/analyzeCommitJob";
-
-
-export default async function processDeploymentEvent(event: NormalizedWebhookEvent, rawmsg?: ConsumeMessage): Promise<void> {
+export default async function processDeploymentEvent(
+    event: NormalizedWebhookEvent,
+    rawmsg?: ConsumeMessage
+): Promise<void> {
     console.log("Processing deployment event:", event);
 
     if (!event.commitSha) {
@@ -13,5 +12,10 @@ export default async function processDeploymentEvent(event: NormalizedWebhookEve
         return;
     }
 
-    await analyzeCommitJob(event);
+    // Pipeline Steps:
+    // Step 1: Fetch Git Diff & modified files via github.service
+    // Step 2: Deterministic AST Analysis via @thirdeye/analysis
+    // Step 3: AI Semantic Review (LLM Diff Analysis)
+    // Step 4: Persist Results to PostgreSQL (@thirdeye/database)
+    // Step 5: Publish Result / Notification to RabbitMQ
 }
