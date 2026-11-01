@@ -1,11 +1,12 @@
 /**
  * @thirdeye/analysis
  *
- * Code analysis engine including:
- * - Diff parsing
- * - Static analysis integrations
- * - AI-based code review
- * - Result normalization
+ * Core static analysis and security scanning engine.
+ * Stateless, deterministic, and decoupled from queues or database drivers.
  */
 
-export {};
+export * from "./types";
+export * from "./ast/engine";
+export * from "./ast/rules";
+export * from "./diff/parser";
+export * from "./scorer";
