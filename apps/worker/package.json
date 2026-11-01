@@ -9,6 +9,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@thirdeye/analysis": "workspace:*",
     "@thirdeye/queue": "workspace:*"
   },
   "devDependencies": {
