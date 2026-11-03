@@ -10,7 +10,6 @@ import processDeploymentEvent from "./processors/deployment.processor"
 const CONCURRENCY: number = Number(process.env.WORKER_CONCURRENCY) || 5;
 
 
-
 async function bootstrap() {
   await queueManager.start();
 
