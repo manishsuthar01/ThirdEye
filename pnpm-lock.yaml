@@ -34,6 +34,32 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  apps/scanner-runner:
+    dependencies:
+      '@thirdeye/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  apps/source-fetcher:
+    dependencies:
+      '@thirdeye/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   apps/web:
     dependencies:
       next:
@@ -73,9 +99,15 @@ importers:
 
   apps/worker:
     dependencies:
+      '@thirdeye/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
       '@thirdeye/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@thirdeye/types':
+        specifier: workspace:*
+        version: link:../../packages/types
     devDependencies:
       '@types/node':
         specifier: ^20

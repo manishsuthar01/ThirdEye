@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@thirdeye/analysis": "workspace:*",
-    "@thirdeye/queue": "workspace:*"
+    "@thirdeye/queue": "workspace:*",
+    "@thirdeye/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20",
