@@ -2,229 +2,262 @@
 
 ## 1. Executive Summary & Vision
 
-**ThirdEye** (DevPulse) is a developer-centric **observability, deployment tracking, and incident correlation platform**. 
+**ThirdEye** is a developer-first **AppSec, deployment observability, and incident correlation platform** built specifically for modern full-stack web applications.
 
 ### The Problem
-When modern web applications fail or experience sudden error spikes in production, the root cause is almost always a **recent code deployment or configuration release**. Traditional Application Performance Monitoring (APM) tools (e.g., Datadog, New Relic) are often overly complex, expensive, and separated from developer workflows. Error loggers (e.g., Sentry) log exceptions, but lack native, first-class context on who deployed what and when.
+1. **The Deployment Blindspot**: When production applications break or experience error surges, the root cause is almost always a recent code push, configuration change, or deployment. Traditional APM tools isolate metrics and errors away from the developer's Git and deployment context.
+2. **The AppSec Noise Problem in Pull Requests**: AI-driven development ("vibecoding") produces code at unprecedented velocity, frequently introducing critical security regressions (unauthenticated endpoints, broken authorization/IDOR, leaked secrets, and vulnerable dependencies). Existing security tools either spam developers with hundreds of legacy repository alerts or require complex, slow enterprise setups.
 
 ### The Solution
-ThirdEye bridges the gap between **code deployments and application health**:
-- **Answers the critical question**: *"Did our latest deployment cause these errors?"*
-- **Correlates**: GitHub commits & PRs ↔ Vercel deployments ↔ Real-time application errors & HTTP 500s.
-- **Highlights the root cause**: Surfaces a unified, chronological timeline pinpointing the exact deployment, commit SHA, and author responsible for an incident.
+ThirdEye bridges the gap between **code changes, application health, and pull request security**:
+- **PR Security Impact Engine**: Analyzes pull requests by scanning both **Base Revision** and **Head Revision**, categorizing findings into **New (Regressions)**, **Resolved (Fixed)**, and **Persistent (Existing Debt)**.
+- **Pragmatic Scanner Architecture**: Reuses proven open-source scanners (OpenGrep for SAST, Trivy for dependencies and secrets) behind modular adapters, focusing custom engineering where it matters: security delta comparison, resilient fingerprinting, and application-specific authorization analysis.
+- **Incident & Deployment Correlation**: Traces production error spikes directly to the exact deployment, commit SHA, and author responsible for an incident on a unified chronological timeline.
 
 ---
 
 ## 2. High-Level Architecture Diagram
 
-```
-                 ┌─────────────────────────────────┐
-                 │         GitHub / Vercel         │
-                 │        Webhooks & APIs          │
-                 └────────────────┬────────────────┘
-                                  │
-                                  ▼
-                 ┌─────────────────────────────────┐
-                 │       ThirdEye API Server       │
-                 │       (Node.js / Express)       │
-                 └────────────────┬────────────────┘
-                                  │
-                           Validate Webhook
-                           Enqueue Payload
-                                  │
-                                  ▼
-                 ┌─────────────────────────────────┐
-                 │       Message Queue Layer       │
-                 │        (BullMQ + Redis)         │
-                 └────────────────┬────────────────┘
-                                  │
-          ┌───────────────────────┼───────────────────────┐
-          ▼                       ▼                       ▼
-   ┌──────────────┐        ┌──────────────┐       ┌───────────────┐
-   │  Deployment  │        │    Error     │       │  Correlation  │
-   │    Worker    │        │    Worker    │       │    Worker     │
-   └──────┬───────┘        └──────┬───────┘       └───────┬───────┘
-          │                       │                       │
-          └───────────────────────┼───────────────────────┘
-                                  │
-                                  ▼
-                 ┌─────────────────────────────────┐
-                 │        PostgreSQL Database      │
-                 │   Events / Errors / Deployments │
-                 └────────────────┬────────────────┘
-                                  │
-                         ┌────────▼────────┐
-                         │   Redis Cache   │
-                         │   & Pub/Sub     │
-                         └────────┬────────┘
-                                  │
-                         ┌────────▼────────┐
-                         │    Dashboard    │
-                         │ (Next.js/React) │
-                         └─────────────────┘
+```text
+GitHub App / Vercel
+(PRs, Pushes, Deployments)
+          │
+          ▼
+┌────────────────────────────────────────────────────────┐
+│ ThirdEye API Server (Node.js / Express)                │
+│ • HMAC SHA-256 Signature Verification                  │
+│ • Webhook Event Normalization & Idempotency Gate       │
+│ • Non-Blocking Ingestion (HTTP 202 Accepted)           │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Message Broker Layer: RabbitMQ (AMQP 0-9-1)            │
+│ • Topic Exchange: thirdeye.events                      │
+│ • Routing Keys: deployment.#, error.#, incident.#      │
+│ • Dead-Letter Safety: thirdeye.dlx -> failed_events_dlq│
+└─────────────┬────────────────────────────┬─────────────┘
+              │                            │
+              ▼                            ▼
+┌──────────────────────────────┐ ┌───────────────────────┐
+│ PR Security & Deployment     │ │ Error & Correlation   │
+│ Worker Fleet (apps/worker)   │ │ Workers               │
+│ • Workspace Manager (Git CLI)│ │ • Error Grouping      │
+│ • Isolated Scanner Runner    │ │ • Fingerprinting      │
+│   - OpenGrep (SAST)          │ │ • Time-Window Match   │
+│   - Trivy (SCA + Secrets)    │ │ • Incident Generation │
+└─────────────┬────────────────┘ └───────────┬───────────┘
+              │                              │
+              └──────────────┬───────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────┐
+│ Intelligence & Comparison Engine (@thirdeye/analysis)  │
+│ • Scanner Adapters (SARIF / JSON -> SecurityFinding)   │
+│ • Resilient Fingerprinting (Line-drift tolerance)      │
+│ • Security Delta Engine (Base vs. Head Diff)           │
+│ • Future: Custom Cross-Layer Authorization Engine      │
+└────────────────────────────┬───────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────┐
+│ PostgreSQL Database (@thirdeye/database)               │
+│ • Scan Result Cache (repoId, commitSHA, configHash)    │
+│ • Normalized Findings, Security Deltas, Incidents      │
+└────────────────────────────┬───────────────────────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+┌──────────────────────────────┐ ┌───────────────────────┐
+│ GitHub Checks API Dispatcher │ │ Observability UI      │
+│ • PR Annotations & Summaries │ │ (apps/web - Next.js)  │
+│ • Block / Warn on New Issues │ │ • Unified Timeline    │
+└──────────────────────────────┘ └───────────────────────┘
 ```
 
 ---
 
 ## 3. Subsystem Breakdown
 
-### 3.1. Integrations Layer
-- **V1 (Zero-SDK Approach)**:
-  - **GitHub**: Captures repositories, branch pushes, commits, and pull requests via Webhooks & GitHub REST/GraphQL APIs.
-  - **Vercel**: Captures deployment states (`BUILDING`, `READY`, `ERROR`, `CANCELED`), commit SHAs, deployment URLs, and environments (Preview vs. Production).
-  - **Webhook Endpoints**: Receives real-time events securely with HMAC signature verification.
-- **Future Enhancements**:
-  - Native ThirdEye SDK for direct runtime instrumentation.
-  - Log collectors & Docker/Kubernetes container sidecars.
-  - Additional cloud providers (AWS, GCP, Netlify, Render, Railway).
-
----
-
-### 3.2. API Server (Ingestion & Core Management)
-- **Tech Stack**: Node.js, TypeScript.
-- **Responsibilities**:
-  - Authentication & Organization/Project management.
-  - OAuth handshakes (GitHub App / Vercel Integration).
-  - Secure webhook ingestion endpoints.
-  - Event payload validation and rate-limiting.
-- **Design Principle (Fast Ingestion)**:
-  The API server strictly acts as a high-throughput, non-blocking gatekeeper. It must **not** perform heavy data processing synchronously.
+### 3.1. Integrations & Ingestion Gateway (`apps/api`)
+- **GitHub App**:
+  - Webhook listener for `pull_request` (`opened`, `synchronize`, `reopened`) and `push` events.
+  - Publishes actionable scan summaries and code annotations directly onto pull requests via the **GitHub Checks API**.
+- **Vercel Integration**:
+  - Captures deployment states (`BUILDING`, `READY`, `ERROR`), commit SHAs, and environments.
+- **Fast-Ingestion Design**:
+  ```text
+  Incoming Webhook ──► Validate HMAC ──► Normalize Event ──► Publish to RabbitMQ ──► HTTP 202 Accepted
   ```
-  Incoming Webhook ──► Validate Signature ──► Enqueue Job ──► HTTP 200 OK (Fast Ack)
-  ```
+  The API gatekeeper never executes scans or heavy database operations synchronously, ensuring sub-10ms response times and preventing webhook delivery timeouts.
 
 ---
 
-### 3.3. Asynchronous Message Broker Layer (RabbitMQ)
-- **Tech Stack**: RabbitMQ (AMQP 0-9-1 protocol, `amqplib` client).
-- **Purpose**: Decouples webhook ingress from analytical processing, providing flexible topic-based routing, guaranteed delivery with manual acknowledgments (`ack`/`nack`), backpressure handling (`basic.qos`), and dead-letter safety.
-- **AMQP 0-9-1 Topology & Routing**:
-  - **Exchanges**:
-    - `thirdeye.events.topic` (Topic Exchange): Central exchange where all ingress events are published.
-  - **Routing Key Hierarchy**:
-    - `deployment.vercel.created` / `deployment.vercel.succeeded` / `deployment.vercel.error`
-    - `github.push` / `github.pull_request`
-    - `error.runtime` / `error.http500`
-    - `incident.detected`
-  - **Queues & Worker Bindings**:
-    - `deployment_processing_queue`: Bound to `deployment.*` and `github.*`
-    - `error_processing_queue`: Bound to `error.*`
-    - `correlation_processing_queue`: Bound to `deployment.*` and `error.*`
-    - `notifications_queue`: Bound to `incident.*`
-  - **Reliability & Dead Lettering**:
-    - `thirdeye.dlx` (Dead Letter Exchange) and `failed_events_dlq` to capture rejected/poison-pill messages for inspection.
+### 3.2. Message Broker Layer (`packages/queue`)
+- **Protocol**: AMQP 0-9-1 via `amqplib`.
+- **Topic Exchange Topology (`thirdeye.events`)**:
+  - `deployment.github.pull_request`
+  - `deployment.github.push`
+  - `deployment.vercel.succeeded`
+  - `error.runtime`
+  - `incident.detected`
+- **Consumer Backpressure & Flow Control**:
+  Workers configure explicit prefetch limits (`channel.prefetch(5)`) to prevent memory exhaustion when multiple pull requests or burst deployments trigger scans simultaneously.
+- **Dead-Letter Exchange (`thirdeye.dlx`)**:
+  Toxic or unrecoverable payloads are rejected with `requeue: false`, quarantining them into `thirdeye.failed_events_dlq` without blocking the worker fleet.
 
 ---
 
-### 3.4. Background Worker Fleet
-Independent worker processes consume queue tasks and execute specific domain logic:
+### 3.3. Worker Fleet & PR Security Scanner (`apps/worker`)
 
-1. **Deployment Worker**:
-   - Parses deployment payloads and extracts deployment URLs, environments, commit SHAs, and statuses.
-   - Upserts deployment records in PostgreSQL.
-2. **Error Worker**:
-   - Ingests incoming errors and normalizes stack traces.
-   - Groups duplicate errors using fingerprinting algorithms (e.g., hash of route + error type + top stack frame).
-   - Updates error frequency counters.
-3. **Correlation Worker (Core Intelligence)**:
-   - Detects correlations between new deployments and sudden error spikes.
-   - Evaluates:
-     - **Timeframe**: Errors starting within $X$ minutes of a deployment finish.
-     - **Scope**: Matching route, microservice, or environment.
-     - **Anomaly**: Error rate exceeding historical baseline.
-   - Automatically generates an **Incident** record tied to the specific deployment and commit.
-4. **Notification Worker**:
-   - Dispatches actionable alerts containing deployment context, suspect commit, and culprit route.
-   - Channels: Email, Discord, Slack, and in-app webhooks.
+#### Build vs. Buy Technology Decisions
+We deliberately avoid reinventing existing, solved open-source tools:
 
----
-
-### 3.5. Persistence Layer (PostgreSQL)
-PostgreSQL acts as the single source of truth for all relational entities:
-- `users`: User profiles and authentication details.
-- `projects`: Monitored applications and environments.
-- `integrations`: OAuth tokens and webhook secrets (GitHub, Vercel).
-- `repositories`: Linked Git repositories and branches.
-- `commits`: Commit hash, author, commit message, timestamp.
-- `deployments`: Deployment ID, provider, status, target branch/commit, deployed URL.
-- `errors`: Fingerprinted error occurrences, messages, stack traces, and metadata.
-- `events`: Raw and processed lifecycle events.
-- `incidents`: Detected anomalies, severity level, affected routes, and linked deployment.
-- `notifications`: Delivery logs and alert preferences.
-
----
-
-### 3.6. Streamlined Infrastructure (No Redis Needed in V1)
-By replacing BullMQ with RabbitMQ, the architecture eliminates the operational requirement for Redis in V1:
-- **Brokerage & Queuing**: RabbitMQ natively provides message persistence, consumer queues, topic routing, and backpressure without needing Redis as an intermediary engine.
-- **Idempotency & Deduplication**: PostgreSQL unique constraints (e.g. `event_id` or `idempotency_key` on webhook records) provide ACID-compliant deduplication.
-- **Result**: Leaner local footprint (only PostgreSQL + RabbitMQ containers required).
-
----
-
-### 3.7. Frontend Dashboard
-- **Tech Stack**: Next.js (App Router), React, TailwindCSS.
-- **Key Views**:
-  - **Project Overview**: High-level health score, active deployment status, and error counts.
-  - **Deployments**: History of all Vercel/CI builds, commit authors, and status tags.
-  - **Errors**: Grouped error list with stack traces, frequency counts, and first/last seen timestamps.
-  - **Incidents**: Active and resolved incidents with correlation summaries.
-  - **Unified Timeline (Signature Feature)**: Real-time chronological feed linking deployments directly to error spikes:
-    ```
-    14:32  🚀 Deployment #182 (main - "fix: checkout cart")
-    14:35  ⚠️ Error rate increased (+450%)
-    14:36  🔥 /checkout → 500 Internal Server Error
-    14:37  🔍 42 similar errors grouped (TypeError: Cannot read properties of undefined)
-    14:38  🚨 Incident #42 triggered: High probability linked to Deployment #182
-    ```
-
----
-
-## 4. End-to-End V1 Event Flow
-
-```
-User connects GitHub & Vercel
-           │
-           ▼
-Developer pushes code & triggers Vercel deployment
-           │
-           ▼
-Vercel dispatches `deployment.succeeded` webhook
-           │
-           ▼
-ThirdEye API validates signature & publishes to RabbitMQ
-           │
-           ▼
-Deployment Worker saves deployment to PostgreSQL
-           │
-           ▼
-Runtime errors occur on newly deployed service
-           │
-           ▼
-Error Worker groups errors & notices anomaly
-           │
-           ▼
-Correlation Worker matches error window with Deployment #182
-           │
-           ▼
-Incident generated in PostgreSQL
-           │
-           ▼
-Dashboard updates in real-time & Notification Worker alerts the team
-```
-
----
-
-## 5. Phased Implementation Roadmap
-
-| Phase | Milestone | Focus Areas |
+| Responsibility | Choice | Rationale |
 | :--- | :--- | :--- |
-| **Phase 1** | **Auth & Projects** | Multi-tenant auth, organization/project management, API key issuance. |
-| **Phase 2** | **GitHub Integration** | GitHub App / OAuth, repo selection, commit & PR sync. |
-| **Phase 3** | **Vercel Integration** | Vercel OAuth, deployment webhook setup, project mapping. |
-| **Phase 4** | **Webhook Ingestion** | High-throughput signature verification, idempotency, raw payload logging. |
-| **Phase 5** | **Message Broker & Workers** | RabbitMQ broker setup, exchange topology, worker bindings, and dead-letter safety. |
-| **Phase 6** | **Deployment Timeline** | Next.js timeline UI rendering deployments with Git commit context. |
-| **Phase 7** | **Error Ingestion & Grouping** | Ingestion endpoint, stack trace parsing, error fingerprinting. |
-| **Phase 8** | **Correlation Engine** | Time-window algorithms linking error rate spikes to deployment events. |
-| **Phase 9** | **Alerts & Notifications** | Discord/Slack webhooks, email alerts, and in-app incident resolution. |
+| **SAST** | **OpenGrep** | Mature, fast Semgrep fork (LGPL-2.1), structural pattern matching, intrafile taint analysis, standard JSON/SARIF output. |
+| **SCA (Dependencies)** | **Trivy** | Industry-standard lockfile and vulnerability database scanning. |
+| **Secret Detection** | **Trivy** | Built-in repository secret and credential scanning without running a separate daemon. |
+| **Git Operations** | **Git CLI** | Battle-tested, fast workspace checkout for Base and Head revisions. |
+| **Core Orchestration** | **TypeScript / Node.js** | Unified language across the monorepo. |
+| **Persistence** | **PostgreSQL** | ACID reliability for scan caching, finding deduplication, and relational history. |
+
+#### Isolated Scanner Execution
+Pull request code represents untrusted input:
+1. Scanners execute in isolated, disposable environments with strict CPU and memory limits.
+2. Source checkouts are mounted read-only (`ro`); scanner output directories are isolated.
+3. Scanner environments run without elevated privileges and have no access to GitHub write tokens or internal network resources.
+4. Static analysis runs without executing arbitrary repository build scripts (`npm install`, `build`).
+
+---
+
+### 3.4. Intelligence & Comparison Engine (`@thirdeye/analysis`)
+
+This is where ThirdEye provides unique product value:
+
+#### A. Scanner Adapters & Canonical Finding Schema
+External scanner formats (OpenGrep SARIF, Trivy JSON) are isolated behind adapters. The rest of ThirdEye only consumes canonical `SecurityFinding` objects:
+
+```typescript
+export interface SecurityFinding {
+  fingerprint: string;                  // Stable identifier resilient to line shifts
+  ruleId: string;                       // e.g. "javascript.express.security.audit.xss"
+  source: "opengrep" | "trivy";
+  category: "sast" | "dependency" | "secret";
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  title: string;
+  description: string;
+  location: {
+    file: string;
+    startLine?: number;
+    endLine?: number;
+  };
+  remediation?: string;
+  evidence: string[];                   // Redacted code snippets; raw secrets are NEVER persisted
+}
+```
+
+#### B. Resilient Finding Fingerprinting
+Line numbers drift as code is added or removed elsewhere in a file. To avoid falsely reporting an existing finding as "resolved" and "re-introduced", fingerprints are computed from immutable attributes:
+$$\text{Fingerprint} = \text{Hash}(\text{ruleId} + \text{normalizedPath} + \text{sanitizedSinkOrSnippet})$$
+
+#### C. Two-Snapshot Security Delta Comparison
+A pull request is evaluated by comparing two snapshots:
+```text
+Base Revision Scan ─────┐
+                        ├── Compare Fingerprints ──► Security Delta Report
+Head Revision Scan ─────┘
+```
+
+The Delta Engine categorizes findings into four states:
+1. **New (`new`)**: Vulnerabilities present in `Head` that did not exist in `Base` (Must be flagged/blocked).
+2. **Resolved (`resolved`)**: Vulnerabilities present in `Base` that are no longer present in `Head` (Celebrated as fixes).
+3. **Persistent (`persistent`)**: Pre-existing debt unchanged by this PR (Summarized without blocking).
+4. **Worsened (`worsened`)**: Pre-existing issues whose severity or scope increased.
+
+#### D. Aggressive Scan Result Caching
+To optimize performance, scans are cached by composite key:
+$$\text{CacheKey} = (\text{repositoryId}, \text{commitSHA}, \text{scannerVersion}, \text{rulesetVersion})$$
+- When multiple PRs share the same `main` base commit, the Base scan is reused instantly.
+- When an author pushes a new commit (`synchronize`), only the new Head commit is scanned.
+
+---
+
+### 3.5. Long-Term Core Goals & Advanced Capabilities
+
+While the MVP focuses on reliable OpenGrep/Trivy orchestration and Delta analysis, ThirdEye’s roadmap includes high-value proprietary capabilities:
+
+#### 1. Custom Cross-Layer Authorization Engine (Post-MVP)
+Existing SAST scanners struggle with framework-specific authorization flows. Using the TypeScript Compiler API, ThirdEye will trace end-to-end data paths in full-stack applications:
+```text
+React Client Component ("use client")
+    ↓
+API Client (fetch / axios)
+    ↓
+Express / Next.js API Route Handler
+    ↓
+Authentication & Role Middleware
+    ↓
+Service / Controller
+    ↓
+Database ORM Query (Prisma / Drizzle / Mongoose)
+    ↓
+Tenant Ownership / Row-Level Validation
+```
+This detects **Broken Object Level Authorization (BOLA/IDOR)** and missing tenant filters that generic pattern-matchers cannot see.
+
+#### 2. AI-Assisted Semantic Investigation (Post-MVP)
+- **Role**: AI does not guess whether code is vulnerable; it investigates candidate findings produced by the deterministic engine.
+- **Capabilities**: Explains attack vectors, suggests contextual code patches tailored to the repository's coding style, and correlates multiple medium findings into a single attack chain.
+
+#### 3. Real-Time Deployment & Error Correlation
+- Ingests production exceptions and HTTP 500s.
+- Correlates error spikes within $X$ minutes of a deployment completion to the offending commit, author, and route.
+- Displays a unified chronological timeline connecting deployments directly to production health.
+
+---
+
+## 4. End-to-End Pull Request Event Flow
+
+```text
+1. Developer opens or updates PR on GitHub
+                       │
+                       ▼
+2. ThirdEye API verifies HMAC & acknowledges HTTP 202 Accepted
+                       │
+                       ▼
+3. Enqueued to RabbitMQ "thirdeye.events" (deployment.github.pull_request)
+                       │
+                       ▼
+4. Worker checks cache for Base SHA scan result:
+   - Cache hit: Load base findings from PostgreSQL
+   - Cache miss: Run OpenGrep & Trivy on Base workspace, cache results
+                       │
+                       ▼
+5. Worker checks/runs OpenGrep & Trivy on Head workspace
+                       │
+                       ▼
+6. Security Delta Engine (@thirdeye/analysis) diffs Base vs. Head findings
+                       │
+                       ▼
+7. Results stored in PostgreSQL (commits, findings, deltas)
+                       │
+                       ▼
+8. Worker calls GitHub Checks API:
+   - Green Check: 0 new vulnerabilities (or resolved existing debt)
+   - Actionable Annotations: Pinpoints exact lines of newly introduced security regressions
+```
+
+---
+
+## 5. Implementation Roadmap
+
+| Milestone | Deliverable | Focus Areas |
+| :--- | :--- | :--- |
+| **Milestone 1** | **PR Ingestion & Workspace Prep** | GitHub PR webhook adapter, RabbitMQ routing, Git CLI shallow snapshot retrieval for Base & Head. |
+| **Milestone 2** | **Scanner Adapters (OpenGrep & Trivy)** | Adapter pattern, isolated container execution, SARIF and JSON raw output parsing. |
+| **Milestone 3** | **Normalization & Security Delta** | Canonical `SecurityFinding` schema, resilient fingerprinting, Base vs. Head delta comparison. |
+| **Milestone 4** | **GitHub Checks API Integration** | Publishing PR status checks, markdown summary reports, and in-line code annotations. |
+| **Milestone 5** | **Custom Authorization Analysis** | TypeScript AST engine tracing Next.js/Express routes down to ORM queries for tenant boundary checks. |
+| **Milestone 6** | **AI-Assisted Investigation** | Contextual explanations, attack path correlation, and automatic patch generation. |
+| **Milestone 7** | **Deployment ↔ Error Correlation** | Production runtime error ingestion, stack trace fingerprinting, and unified incident timeline. |

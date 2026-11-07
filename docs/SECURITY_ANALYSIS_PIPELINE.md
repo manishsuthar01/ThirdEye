@@ -1,23 +1,24 @@
-# ThirdEye — Worker Architecture & Security Analysis Pipeline Specification
+# ThirdEye — Worker Architecture & PR Security Pipeline Specification
 
-> **North Star Vision**: Vibecoded applications are built at incredible speed using AI generators (Cursor, Claude, v0, Bolt, Lovable), but frequently introduce critical security vulnerabilities—such as unauthenticated endpoints, broken authorization (BOLA/IDOR), client-side secret exposure, and missing row-level protections.
+> **North Star Vision**: Vibecoded applications are built at incredible speed using AI generators (Cursor, Claude, v0, Bolt, Lovable), but frequently introduce critical security regressions—such as unauthenticated endpoints, broken authorization (BOLA/IDOR), client-side secret exposure, and vulnerable packages.
 >
-> **ThirdEye's Mission**: Provide an automated, zero-configuration security guardian that inspects every Git commit in real-time, calculates a **Delta Risk Score**, and pinpoints exact security regressions with actionable fixes.
+> **ThirdEye's Mission**: Provide an automated, zero-configuration security guardian that inspects every Pull Request, runs battle-tested scanners (OpenGrep, Trivy) behind isolated adapters, computes the **Security Delta** (Base vs. Head), and surfaces actionable findings directly via GitHub Checks.
 
 ---
 
 ## 1. High-Level System Architecture
 
-```
+```text
                   ┌──────────────────────────────────────────────┐
-                  │          GitHub Webhook Ingestion            │
+                  │            GitHub Webhook Ingestion          │
                   │   POST /api/webhook/github (API Service)     │
+                  │   Events: pull_request (opened, sync, reopen)│
                   └──────────────────────┬───────────────────────┘
                                          │
                                          ▼
                   ┌──────────────────────────────────────────────┐
                   │       RabbitMQ: "thirdeye.events"            │
-                  │       Routing Key: deployment.github.push    │
+                  │       Routing Key: deployment.github.pr      │
                   └──────────────────────┬───────────────────────┘
                                          │
                                          ▼
@@ -30,21 +31,38 @@
 │                        ThirdEye Worker Fleet                           │
 │                                                                        │
 │  1. Ingress & Deserialization (queueManager.createConsumer)            │
-│  2. Git Diff Extraction (GitHub Compare API / Unified Diff)            │
+│  2. Workspace Snapshot Manager (Git CLI): Base SHA & Head SHA          │
 │                                                                        │
-│  ┌───────────────────────────────┬──────────────────────────────────┐  │
-│  │ Track 1: Deterministic Engine │ Track 2: AI Semantic Engine      │  │
-│  │ (Abstract Syntax Tree - AST)  │ (LLM Contextual Diff Review)     │  │
-│  ├───────────────────────────────┼──────────────────────────────────┤  │
-│  │ • Unauthenticated Route Gate  │ • Broken Object Auth (BOLA/IDOR) │  │
-│  │ • Client Secret Leaks         │ • Business Logic Bypass          │  │
-│  │ • Direct DB from Client Comp  │ • Privilege Escalation           │  │
-│  │ • Deterministic & Instant     │ • Context-Aware & Deep           │  │
-│  └───────────────────────────────┴──────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Scanner Runner (Disposable, Isolated Container Execution)        │  │
+│  ├──────────────────────────────────┬───────────────────────────────┤  │
+│  │ OpenGrep Adapter                 │ Trivy Adapter                 │  │
+│  │ • Structural pattern matching    │ • Dependency lockfile scanning│  │
+│  │ • Intrafile taint analysis       │ • Secret & credential leaks   │  │
+│  │ • Emits raw SARIF / JSON         │ • Emits raw JSON              │  │
+│  └──────────────────────────────────┴───────────────────────────────┘  │
 │                                  │                                     │
-│  3. Delta Risk Calculator (Security Score: 0 - 100%)                   │
-│  4. PostgreSQL Persistence Layer (@thirdeye/database)                  │
-│  5. Real-Time Alerting (Incident / Webhook / PR Comment)               │
+│  3. Finding Normalizer & Fingerprinter (@thirdeye/analysis)            │
+│     - Translates raw outputs into canonical SecurityFinding[]          │
+│     - Hashes ruleId + normalizedPath + codeSink to avoid line drift    │
+│                                  │                                     │
+│  4. Security Delta Engine (@thirdeye/analysis)                         │
+│     - Diff Base findings vs. Head findings                             │
+│     - Categorizes: New (Regressions), Resolved, Persistent, Worsened   │
+│     - Caches snapshots: (repoId, commitSHA, configHash)                │
+│                                  │                                     │
+│  5. Results Dispatcher & Reporter                                      │
+│     - Persist scans and deltas to PostgreSQL (@thirdeye/database)       │
+│     - Post Checks report and annotations to GitHub Checks API          │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Long-Term Proprietary Engines (Phases 5 & 6)                     │  │
+│  ├──────────────────────────────────┬───────────────────────────────┤  │
+│  │ Custom Cross-Layer Auth Engine   │ AI Semantic Investigation     │  │
+│  │ (TypeScript Compiler AST)        │ (Contextual Explanation)      │  │
+│  │ • Client -> Route -> ORM Tracing │ • Attack path investigation   │  │
+│  │ • Deep BOLA / IDOR detection     │ • Custom patch generation     │  │
+│  └──────────────────────────────────┴───────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -56,132 +74,109 @@
 The worker runs as an independent long-lived Node.js process decoupled from the HTTP API server.
 
 * **Queue Subscription**: Listens to `deployments_queue` bound to `deployment.#`.
-* **Flow Control & Backpressure**: Configured with `channel.prefetch(5)` to prevent memory exhaustion when a large repo pushes multiple branches simultaneously.
-* **Dead-Letter Handling**: If a message fails due to an unrecoverable bug, it is rejected without requeue (`requeue: false`), routing it to `thirdeye.dlx` ➔ `failed_events_dlq` for forensic inspection.
+* **Flow Control & Backpressure**: Configured with `channel.prefetch(5)` to prevent memory exhaustion when a busy repository pushes multiple commits simultaneously.
+* **Dead-Letter Handling**: If a message fails due to an unrecoverable payload or bug, it is rejected without requeue (`requeue: false`), routing it to `thirdeye.dlx` ➔ `failed_events_dlq` for forensic inspection.
 
 ---
 
-### 2.2. Track 1: Deterministic Security Engine (AST Analysis)
+### 2.2. Isolated Scanner Runner & Adapter Architecture
+Pull request code is untrusted. We run open-source scanners in isolated, ephemeral environments:
+- **Zero Elevated Privileges**: Runs as a non-root, unprivileged process.
+- **Read-Only Source Mounts**: The repository workspace is mounted strictly read-only (`ro`); scanner output directories are isolated.
+- **No Arbitrary Script Execution**: Static analysis does not run `npm install` or execute repository scripts.
 
-#### Why AST (Abstract Syntax Tree) Over Regular Expressions?
-Regular expressions fail when analyzing code because they cannot understand syntax semantics:
-* Regex gets tricked by comments: `// const key = "secret"` triggers false positives.
-* Regex breaks across line breaks and formatting variations.
-* Regex has no understanding of **scope** or **call hierarchies**.
-
-An **Abstract Syntax Tree (AST)** parses source text into a structured tree of nodes (`ImportDeclaration`, `FunctionDeclaration`, `CallExpression`, `Identifier`), allowing 100% deterministic, zero-hallucination code queries.
-
-#### Zero External Libraries: The Native TypeScript Compiler API
-TypeScript includes a built-in compiler parser accessible directly via `typescript`:
+#### The Scanner Adapter Pattern
+ThirdEye depends only on its internal finding contracts, never on specific scanner output formats:
 
 ```typescript
-import ts from "typescript";
-
-// Parse code into an Abstract Syntax Tree in memory (< 2ms)
-const sourceFile = ts.createSourceFile(
-  "app/api/billing/route.ts",
-  fileContent,
-  ts.ScriptTarget.Latest,
-  true // setParentNodes
-);
-
-// Traverse every node in the AST
-function inspectNode(node: ts.Node) {
-  if (ts.isFunctionDeclaration(node) || ts.isArrowFunction(node)) {
-    // Check if this is an exported HTTP handler (GET, POST, DELETE)
-    // Check if any of its child expressions call auth() or getServerSession()
-  }
-  ts.forEachChild(node, inspectNode);
+export interface SecurityFinding {
+  fingerprint: string;                  // Stable identifier resilient to line shifts
+  ruleId: string;                       // e.g. "javascript.express.security.audit.xss"
+  source: "opengrep" | "trivy";
+  category: "sast" | "dependency" | "secret";
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  title: string;
+  description: string;
+  location: {
+    file: string;
+    startLine?: number;
+    endLine?: number;
+  };
+  remediation?: string;
+  evidence: string[];                   // Redacted code snippets; raw secrets are NEVER persisted
 }
-inspectNode(sourceFile);
-```
 
-#### Deterministic Check #1: The Unauthenticated Route Gate
-* **The Problem in Vibecoding**: AI generates a new mutation route (e.g. `POST /api/delete-account` or Next.js Server Action) and directly calls Prisma/Drizzle without checking the active session.
-* **AST Detection Logic**:
-  1. Identifies file path matching `app/api/**/route.ts` or `pages/api/**` or functions with `"use server"`.
-  2. Detects exported HTTP handlers: `POST`, `PUT`, `DELETE`, `PATCH`.
-  3. Inspects function body AST:
-     - **Positive trigger**: Calls to database mutation functions (`prisma.*.delete`, `db.delete`, `sql` queries).
-     - **Negative trigger (Deficiency)**: No preceding call to an authorization guard (e.g., `getServerSession()`, `auth()`, `verifyToken()`, `requireAuth()`).
-  4. Flagged Severity: **CRITICAL**.
-
-#### Deterministic Check #2: Client-Side Secret & Environment Exposure
-* **The Problem in Vibecoding**: Developers prompt the AI with: *"Use my Stripe secret key to create a checkout session"*, and the AI writes the secret into a client component or names it `NEXT_PUBLIC_STRIPE_SECRET`.
-* **AST Detection Logic**:
-  1. Inspects if file contains `"use client"` directive or is located in client directories (`components/`, `views/`).
-  2. AST searches for `MemberExpression`:
-     - Checks `process.env[key]`.
-     - Flags any key starting with `NEXT_PUBLIC_` containing substrings: `SECRET`, `PRIVATE`, `TOKEN`, `KEY`, `PASSWORD`.
-  3. Searches for direct imports of database clients (`@prisma/client`, `@thirdeye/database`, `drizzle-orm`) inside client files.
-  4. Flagged Severity: **CRITICAL**.
-
----
-
-### 2.3. Track 2: AI-Based Semantic Analysis Engine (LLM Review)
-
-#### Why Deterministic Analysis Alone is Not Enough
-Deterministic AST rules cannot detect **Business Logic Flaws** or **Broken Object Level Authorization (BOLA/IDOR)**.
-
-* **Example BOLA Vulnerability**:
-  ```typescript
-  // The AST sees that session exists (auth is present), BUT:
-  const session = await auth();
-  const document = await db.documents.findUnique({
-    where: { id: req.params.id } // ❌ BOLA: Missing where: { ownerId: session.user.id }
-  });
-  return res.json(document);
-  ```
-  An AST engine considers this safe because `auth()` was called. An **AI engine** understands that anyone can pass any `id` and read any other tenant's document!
-
-#### The AI Prompt & Diff Strategy
-To minimize cost and latency while eliminating hallucinations:
-1. **Scope Down to Diffs**: Never feed the whole repository to the LLM. Feed the **Git Unified Diff** of the commit, filtered to modified files (`.ts`, `.tsx`, `.js`, `.py`).
-2. **Context Window**: For every modified file, extract only added lines (`+`) plus 10 surrounding context lines.
-3. **Strict JSON Schema (Structured Output)**:
-
-```typescript
-export interface AISecurityFinding {
-  vulnerabilityType: "BOLA_IDOR" | "BROKEN_AUTH" | "PRIVILEGE_ESCALATION" | "SENSITIVE_DATA_LEAK";
-  severity: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-  filePath: string;
-  line: number;
-  explanation: string;
-  remediationSnippet: string;
+export interface ScannerAdapter {
+  name: string;
+  run(workspacePath: string): Promise<SecurityFinding[]>;
 }
 ```
 
 ---
 
-### 2.4. The Delta Risk Meter (Scoring Algorithm)
+### 2.3. The Security Delta Engine & Resilient Fingerprinting
 
-Vibecoders do not read long compliance PDFs. They care about **immediate, visible feedback on what changed**.
+#### The Problem with Line-Based Diffing
+If a developer adds 10 lines of comments at the top of a file, every finding below it shifts by 10 lines. A naive comparison tool would report every existing issue as "resolved at line 20" and "new at line 30", creating unbearable notification spam.
 
-#### Mathematical Formula
+#### Fingerprinting Solution
+Fingerprints are computed from stable code identity rather than raw line numbers:
+$$\text{Fingerprint} = \text{SHA256}(\text{ruleId} + \text{normalizedRelativePath} + \text{sanitizedSinkOrSnippet})$$
 
-Every project starts with a **Baseline Security Score**: $S = 100$
+#### Four-State Delta Model
+By comparing `BaseFindings` with `HeadFindings`:
+1. **New (`new`)**: Present in Head, absent in Base. **These are newly introduced regressions that block or warn on the PR.**
+2. **Resolved (`resolved`)**: Present in Base, absent in Head. **These are existing vulnerabilities that the PR successfully fixed.**
+3. **Persistent (`persistent`)**: Present in both Base and Head. **Pre-existing technical debt. Not blamed on this PR.**
+4. **Worsened (`worsened`)**: Pre-existing issues whose severity or scope increased.
 
-Each finding applies a severity penalty:
-* **Critical** ($W_c$): $-25$ points (e.g., Unauthenticated mutation route, leaked master secret)
-* **High** ($W_h$): $-15$ points (e.g., BOLA/IDOR on read queries, missing CSRF)
-* **Medium** ($W_m$): $-5$ points (e.g., Overly permissive CORS, verbose error exposure)
-* **Low** ($W_l$): $-2$ points (e.g., Deprecated package version, missing rate limit)
+#### Aggressive Scan Caching
+```text
+CacheKey = Hash(repositoryId + commitSHA + scannerVersion + rulesetVersion)
+```
+- If another PR targets the same `main` base commit, its Base scan is fetched instantly from PostgreSQL.
+- If a PR author pushes another commit (`synchronize`), only the new Head commit is scanned.
 
-$$\text{Commit Score} = \max\left(0, 100 - \sum (W_i \times N_i)\right)$$
+---
 
-$$\Delta \text{ Risk} = \text{Score}_{\text{new\_commit}} - \text{Score}_{\text{previous\_commit}}$$
+### 2.4. Long-Term Engine: Custom Cross-Layer Authorization Engine (Phase 5)
 
-#### User Experience Representation:
-* If $\Delta < 0$: **Security Regression Alert**
-  > *"⚠️ Commit `c0ffee` dropped security from **95% ➔ 70%** ($\Delta -25\%$). Added `/api/billing` with no authentication."*
-* If $\Delta > 0$: **Security Recovery Celebration**
-  > *"🎉 Commit `a1b2c3` improved security to **95%** ($\Delta +25\%$). Resolved unauthenticated route."*
+While OpenGrep handles standard pattern matching and intrafile taint analysis, it cannot easily follow framework-specific authorization flows across files.
+
+In Phase 5, ThirdEye’s proprietary differentiator is a **Cross-Layer AST Tracer** built using the native TypeScript Compiler API (`typescript`):
+
+```text
+React Client Component ("use client")
+    ↓
+API Client (fetch / axios)
+    ↓
+Express / Next.js API Route Handler (app/api/...)
+    ↓
+Authentication Guard (getServerSession / auth())
+    ↓
+Controller / Service Function
+    ↓
+ORM Query (prisma.doc.findUnique / db.select)
+    ↓
+Tenant Ownership Filter ({ where: { id, userId: session.user.id } })
+```
+
+#### Why AST Tracing Outperforms Regex
+- **Zero Hallucinations**: Parses exact syntax semantics, scopes, and symbol references.
+- **BOLA / IDOR Detection**: Verifies that every database mutation or read query filtered by an object ID also includes an active tenant/user ownership constraint.
+
+---
+
+### 2.5. Long-Term Engine: AI Semantic Investigation (Phase 6)
+
+AI does not guess whether code is vulnerable; it investigates candidate findings produced by the deterministic engine:
+1. **Evidence Correlation**: Combines multiple medium-severity findings into an end-to-end exploit scenario.
+2. **Context-Aware Remediation**: Generates ready-to-merge patches formatted specifically to match the project's coding conventions.
+3. **Attack Path Explanation**: Explains in plain English how an attacker could leverage the detected flow.
 
 ---
 
 ## 3. Database Schema Design (`packages/database`)
-
-PostgreSQL is the single source of truth for repository history, commits, and findings.
 
 ```sql
 -- Tracked Projects
@@ -189,82 +184,88 @@ CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(255) UNIQUE NOT NULL,
-    current_security_score INT DEFAULT 100,
+    default_branch VARCHAR(100) DEFAULT 'main',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Commits Inspected
-CREATE TABLE commits (
+-- Scan Cache (Commit-Level Snapshots)
+CREATE TABLE scan_snapshots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     commit_sha VARCHAR(40) NOT NULL,
-    author VARCHAR(255),
-    message TEXT,
-    security_score INT NOT NULL,
-    delta_score INT NOT NULL,
-    pushed_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(project_id, commit_sha)
+    scanner_name VARCHAR(50) NOT NULL,
+    scanner_version VARCHAR(50) NOT NULL,
+    ruleset_hash VARCHAR(64) NOT NULL,
+    raw_findings JSONB NOT NULL,
+    scanned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(project_id, commit_sha, scanner_name, ruleset_hash)
 );
 
--- Individual Security Findings
-CREATE TABLE security_findings (
+-- Pull Request Analyses
+CREATE TABLE pull_request_analyses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    commit_id UUID REFERENCES commits(id) ON DELETE CASCADE,
-    engine VARCHAR(30) NOT NULL, -- 'DETERMINISTIC_AST' | 'AI_SEMANTIC'
-    category VARCHAR(50) NOT NULL,
-    severity VARCHAR(20) NOT NULL, -- 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
-    file_path TEXT NOT NULL,
-    line_number INT,
-    title VARCHAR(255) NOT NULL,
-    explanation TEXT NOT NULL,
-    suggested_patch TEXT,
-    is_resolved BOOLEAN DEFAULT FALSE,
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    pr_number INT NOT NULL,
+    base_sha VARCHAR(40) NOT NULL,
+    head_sha VARCHAR(40) NOT NULL,
+    status VARCHAR(30) NOT NULL, -- 'PENDING' | 'COMPLETED' | 'FAILED'
+    new_findings_count INT DEFAULT 0,
+    resolved_findings_count INT DEFAULT 0,
+    persistent_findings_count INT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_commits_project ON commits(project_id);
-CREATE INDEX idx_findings_commit ON security_findings(commit_id);
+-- Normalized Security Findings (Per Analysis)
+CREATE TABLE security_findings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    analysis_id UUID REFERENCES pull_request_analyses(id) ON DELETE CASCADE,
+    fingerprint VARCHAR(64) NOT NULL,
+    rule_id VARCHAR(255) NOT NULL,
+    source VARCHAR(50) NOT NULL, -- 'opengrep' | 'trivy' | 'thirdeye_auth'
+    category VARCHAR(50) NOT NULL, -- 'sast' | 'dependency' | 'secret'
+    severity VARCHAR(20) NOT NULL, -- 'critical' | 'high' | 'medium' | 'low' | 'info'
+    delta_status VARCHAR(20) NOT NULL, -- 'new' | 'resolved' | 'persistent' | 'worsened'
+    file_path TEXT NOT NULL,
+    start_line INT,
+    end_line INT,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    evidence TEXT[],
+    remediation TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_scan_cache ON scan_snapshots(project_id, commit_sha);
+CREATE INDEX idx_findings_analysis ON security_findings(analysis_id);
+CREATE INDEX idx_findings_fingerprint ON security_findings(fingerprint);
 ```
 
 ---
 
-## 4. Educational Guide: What You Need to Know
+## 4. Educational Guide: Key Principles
 
-### 4.1. Understanding AMQP Message Acknowledgment & Dead-Lettering
-In RabbitMQ, messages must be acknowledged so the broker knows they were safely processed:
-* `channel.ack(msg)`: Processing completed successfully. Message is safely removed from the queue.
-* `channel.reject(msg, false)`: Processing permanently failed. Because `requeue = false`, RabbitMQ routes the message to the Dead Letter Exchange (`thirdeye.dlx`).
-* **Why this matters**: If an LLM call times out or an invalid JSON payload arrives, the worker does NOT crash or loop endlessly; the toxic message is safely quarantined.
+### 4.1. AMQP Reliability & Idempotent Worker Processing
+- **At-least-once Delivery**: RabbitMQ guarantees delivery, meaning consumers must be idempotent.
+- **Handling Restarts**: If a worker crashes midway through a scan, the unacknowledged message returns to the queue and is retried.
+- **Dead-Letter Safety (`thirdeye.dlx`)**: Toxic messages that trigger fatal crashes are rejected (`requeue = false`) and diverted to the dead-letter queue, preventing infinite crash-restart loops.
 
-### 4.2. Understanding Unified Diffs
-A Git diff is structured in chunks (hunks):
-```diff
-@@ -14,6 +14,8 @@ export async function POST(req: Request) {
--  const result = await db.user.delete({ where: { id } });
-+  const session = await auth();
-+  if (!session) return new Response("Unauthorized", { status: 401 });
-+  const result = await db.user.delete({ where: { id, userId: session.user.id } });
-```
-* `@@ -14,6 +14,8 @@`: Old file started at line 14 (6 lines), new file starts at line 14 (8 lines).
-* `-`: Lines removed.
-* `+`: Lines added.
-* Lines with no prefix: Context lines.
+### 4.2. SARIF (Static Analysis Results Interchange Format)
+Both OpenGrep and GitHub Checks natively use **SARIF** (OASIS standard JSON format). Understanding SARIF:
+- `runs[].tool.driver.rules`: Definition of rules and severity.
+- `runs[].results[]`: Finding instances referencing `ruleId`, `message`, and physical `locations[].physicalLocation.artifactLocation.uri`.
 
-Your analysis engine focuses predominantly on lines starting with `+` to analyze new risks introduced by the commit.
-
-### 4.3. Understanding BOLA/IDOR (OWASP API #1)
-Broken Object Level Authorization occurs when an application exposes an endpoint that takes an object identifier (e.g. `/api/invoices/1234`) and fails to check if the requesting user actually owns invoice `1234`. Vibecoders constantly fall into this trap because AI models generate clean queries that omit user-ownership checks.
+Our normalizer consumes SARIF and standardizes it into our clean, lightweight `SecurityFinding` interface.
 
 ---
 
 ## 5. Phased Implementation Roadmap
 
-| Phase | Objective | Deliverables |
+| Milestone | Deliverable | Focus Areas |
 | :--- | :--- | :--- |
-| **Phase 1: Worker Core** | Setup RabbitMQ consumer in `apps/worker` | `queueManager.createConsumer` listening to `deployments_queue`, graceful shutdown. |
-| **Phase 2: Git Diff Fetcher** | Obtain commit diffs | Fetching commit comparisons using GitHub API with commit SHA pairs. |
-| **Phase 3: Deterministic AST** | Build first two AST rules in `@thirdeye/analysis` | 1. Unauthenticated Route Gate<br>2. Client Secret/Env Exposure Scanner. |
-| **Phase 4: Persistence & Delta Meter** | Database records & score logic | PostgreSQL schema migration, score calculation, commit snapshotting. |
-| **Phase 5: AI Semantic Engine** | Contextual LLM analysis | Prompt construction, structured JSON outputs for BOLA/IDOR detection. |
-| **Phase 6: Dashboard & Actionable Fixes** | Present findings to the user | Next.js visual timeline showing Delta Risk dips and copy-pasteable patches. |
+| **M1: Ingestion & Workspace** | PR Webhook & Git Snapshot | PR webhook adapter, RabbitMQ routing, Base & Head shallow retrieval. |
+| **M2: Scanner Adapters** | OpenGrep & Trivy Runner | Containerized execution, SARIF & JSON output parsing into `SecurityFinding[]`. |
+| **M3: Delta Engine & Cache** | Fingerprinting & Comparison | Stable fingerprinting, snapshot caching, Base vs. Head delta classification. |
+| **M4: GitHub Checks API** | PR Feedback Loop | Check runs, status annotations, and PR markdown summaries. |
+| **M5: Custom Auth Engine** | Deep Full-Stack AST Tracing | Cross-layer AST tracking for BOLA/IDOR and unauthenticated route detection. |
+| **M6: AI Semantic Engine** | Contextual Investigation | AI investigation of candidate findings and patch generation. |
+| **M7: Runtime Correlation** | Deployment ↔ Incident Link | Correlating production error surges to deployment timelines. |
