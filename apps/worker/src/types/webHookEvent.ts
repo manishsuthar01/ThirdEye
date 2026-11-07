@@ -1,3 +1,26 @@
+export interface WebhookMetadata {
+    // Pull Request Specific
+    action?: string;
+    prNumber?: number;
+    title?: string;
+    author?: string;
+    baseSha?: string;
+    baseRef?: string;
+    headSha?: string;
+    headRef?: string;
+    cloneUrl?: string;
+    installationId?: number;
+
+    // Push Specific
+    ref?: string;
+    head?: string;
+    before?: string;
+    pusher?: string;
+    compareUrl?: string;
+
+    [key: string]: any;
+}
+
 export interface NormalizedWebhookEvent {
     provider: "github" | "vercel";
     eventType: string;
@@ -5,8 +28,8 @@ export interface NormalizedWebhookEvent {
     projectName: string;
     projectSlug: string;
     commitSha: string;
-    metadata: Record<string, any>;
+    metadata: WebhookMetadata;
     triggerId: string;
     triggerType: string;
-    timestamp: string;
+    timestamp: string | Date;
 }
