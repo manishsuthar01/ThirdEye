@@ -1,5 +1,9 @@
 import type { NormalizedWebhookEvent } from "../types/webHookEvent";
 import type { ConsumeMessage } from "@thirdeye/queue";
+import { createJobWorkspace } from "../sandbox/job-manager";
+import { ScanJob } from "@thirdeye/types";
+import { randomBytes, randomUUID, verify } from "crypto";
+import { executeScanPipeline } from "../orchestrators/scan-pipeline";
 
 export default async function processDeploymentEvent(
     event: NormalizedWebhookEvent,
@@ -16,12 +20,34 @@ export default async function processDeploymentEvent(
         console.log(`[Processor] PR #${event.metadata.prNumber} [${event.metadata.action}] on ${event.projectSlug}`);
         console.log(`[Processor] Base SHA: ${event.metadata.baseSha} -> Head SHA: ${event.commitSha}`);
 
-        // Milestone 1 & 2 Execution Flow:
-        // 1. Prepare Base & Head workspace snapshots via Git CLI
-        // 2. Invoke Scanner Runner (OpenGrep + Trivy adapters)
-        // 3. Compute Security Delta (@thirdeye/analysis)
-        // 4. Report via GitHub Checks API
-        return;
+        const { baseSha, headSha, cloneUrl, prNumber } = event.metadata;
+        if (!baseSha || !headSha || !cloneUrl) {
+            console.warn(`[Processor] Skipping PR #${prNumber}: missing baseSha, headSha, or cloneUrl`);
+            return;
+        }
+
+        const job: ScanJob = {
+            jobId: randomUUID(),
+            repository: {
+                id: event.projectId,
+                slug: event.projectSlug,
+                cloneUrl
+            },
+            revisions: {
+                baseSha,
+                headSha,
+                prNumber
+            },
+            timeoutMs: 20 * 60 * 1000,
+        }
+
+
+        try {
+            await executeScanPipeline(job)
+        } catch (error) {
+            console.error(`Failed to execute scan pipeline for job ${job.jobId}:`, error);
+            return;
+        }
     }
 
     if (event.eventType === "push") {

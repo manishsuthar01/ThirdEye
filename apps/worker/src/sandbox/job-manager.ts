@@ -11,19 +11,18 @@ export interface EphemeralWorkspace {
     cleanup: () => Promise<void>;
 }
 
-/**
- * Manages the lifecycle of ephemeral host workspaces for scan jobs.
- * Enforces explicit directory creation and idempotent cleanup.
- */
 export async function createJobWorkspace(job: ScanJob): Promise<EphemeralWorkspace> {
     const workspacePath = await fs.mkdtemp(path.join(os.tmpdir(), `thirdeye-job-${job.jobId}-`));
     const baseDir = path.join(workspacePath, "base");
     const headDir = path.join(workspacePath, "head");
     const outDir = path.join(workspacePath, "out");
 
-    await fs.mkdir(baseDir, { recursive: true });
-    await fs.mkdir(headDir, { recursive: true });
-    await fs.mkdir(outDir, { recursive: true });
+    await Promise.all([
+        fs.mkdir(outDir, { recursive: true }),
+        fs.mkdir(baseDir, { recursive: true }),
+        fs.mkdir(headDir, { recursive: true }),
+
+    ]);
 
     return {
         workspacePath,
@@ -31,29 +30,12 @@ export async function createJobWorkspace(job: ScanJob): Promise<EphemeralWorkspa
         headDir,
         outDir,
         cleanup: async () => {
-            await fs.rm(workspacePath, { recursive: true, force: true });
+            try {
+                await fs.rm(workspacePath, { recursive: true, force: true });
+                console.log(`[JobManager] Cleaned up workspace: ${workspacePath}`);
+            } catch (err) {
+                console.error(`[JobManager] Failed to clean up workspace ${workspacePath}:`, err);
+            }
         },
     };
 }
-
-import type { ScanJob } from "@thirdeye/types";
-
-export interface EphemeralWorkspace {
-    workspacePath: string;
-    baseDir: string;
-    headDir: string;
-    outDir: string;
-    cleanup: () => Promise<void>;
-}
-
-/**
- * Manages the lifecycle of ephemeral host workspaces for scan jobs.
- */
-export async function createJobWorkspace(job: ScanJob): Promise<EphemeralWorkspace> {
-    // TODO: Create isolated temporary directory on host
-    // TODO: Prepare subdirectories: base/, head/, out/
-    // TODO: Return workspace paths and an idempotent cleanup callback
-
-    throw new Error("Not implemented yet");
-}
-
