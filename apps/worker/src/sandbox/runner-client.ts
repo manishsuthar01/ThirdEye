@@ -34,6 +34,14 @@ export class DockerSandboxRunner implements SandboxRunnerClient {
     }
 
     async fetchSources(job: ScanJob, workspace: EphemeralWorkspace): Promise<void> {
+        if (process.env.SANDBOX_MOCK_MODE === "true") {
+            console.log(`[MockRunner] (Mock Mode) Simulating source acquisition for ${job.repository.slug}...`);
+            await fs.writeFile(path.join(workspace.baseDir, "app.ts"), "// Base code snapshot\nconsole.log('base');\n");
+            await fs.writeFile(path.join(workspace.headDir, "app.ts"), "// Head code snapshot (new route added)\nconsole.log('head');\n");
+            console.log(`[MockRunner] (Mock Mode) Source snapshots written to base/ and head/`);
+            return;
+        }
+
         const args: string[] = [
             "run",
             "--rm",
@@ -52,6 +60,41 @@ export class DockerSandboxRunner implements SandboxRunnerClient {
     }
 
     async runScanners(job: ScanJob, workspace: EphemeralWorkspace): Promise<ScanResult> {
+        if (process.env.SANDBOX_MOCK_MODE === "true") {
+            console.log(`[MockRunner] (Mock Mode) Simulating isolated scanner execution for ${job.jobId}...`);
+
+            const mockResult: ScanResult = {
+                jobId: job.jobId,
+                status: "SUCCESS",
+                scannerMetadata: {
+                    opengrepVersion: "1.0.0-mock",
+                    trivyDbVersion: "2026-11-09-mock",
+                    scannedAt: new Date().toISOString(),
+                },
+                baseFindings: [],
+                headFindings: [
+                    {
+                        fingerprint: "mock-hash-001",
+                        ruleId: "mock.rule.missing_auth",
+                        source: "opengrep",
+                        category: "sast",
+                        severity: "high",
+                        title: "Mock: Route Missing Authentication Guard",
+                        description: "Simulated vulnerability for pipeline verification.",
+                        location: { file: "app.ts", startLine: 1, endLine: 2 },
+                        evidence: ["// Head code snapshot (new route added)"],
+                    },
+                ],
+            };
+
+            // Write results.json into workspace outDir for full filesystem parity
+            const resultsFilePath = path.join(workspace.outDir, "results.json");
+            await fs.writeFile(resultsFilePath, JSON.stringify(mockResult, null, 2), "utf8");
+            console.log(`[MockRunner] (Mock Mode) Results written to ${resultsFilePath}`);
+
+            return mockResult;
+        }
+
         const args = [
             "run",
             "--rm",

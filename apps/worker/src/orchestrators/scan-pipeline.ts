@@ -21,6 +21,8 @@ export async function executeScanPipeline(job: ScanJob): Promise<void> {
             await runnerClient.fetchSources(job, workspace);
 
             const scanResult: ScanResult = await runnerClient.runScanners(job, workspace);
+            console.log("[Pipeline] Full Scan Report Output:\n", JSON.stringify(scanResult, null, 2));
+            console.log(`[Pipeline] Scanners returned: ${scanResult.headFindings.length} findings in Head, ${scanResult.baseFindings.length} findings in Base`);
 
             // const delta: SecurityDelta = calculateRiskScore(scanResult)
 
