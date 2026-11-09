@@ -8,6 +8,15 @@ import { queueManager } from "./lib/queue";
 const app = express();
 
 app.use(express.json());
+
+// Handle malformed JSON payloads gracefully without logging raw stack traces
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "Invalid JSON payload in request body" });
+  }
+  next(err);
+});
+
 app.use("/api/", webhookRouter);
 
 
