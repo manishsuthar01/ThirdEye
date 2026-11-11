@@ -1,0 +1,19 @@
+rules:
+  - id: javascript.express.security.audit.cors.permissive-cors
+    pattern: cors({origin: '*'})
+    message: Permissive CORS configuration detected with wildcard origin.
+    languages: [javascript, typescript]
+    severity: WARNING
+
+  - id: javascript.lang.security.audit.detect-eval
+    pattern: eval(...)
+    message: Direct call to eval() detected. This can lead to arbitrary code execution.
+    languages: [javascript, typescript]
+    severity: ERROR
+
+  - id: javascript.lang.security.audit.hardcoded-jwt-secret
+    pattern: jwt.sign($PAYLOAD, "...", ...)
+    message: Hardcoded JWT secret string detected. Use environment variables.
+    languages: [javascript, typescript]
+    severity: ERROR
+
