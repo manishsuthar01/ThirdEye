@@ -13,8 +13,6 @@ export async function runOpenGrep(
         "scan",
         "--json",
         "--quiet",
-        "--metrics=off",
-        "--disable-version-check",
         "--config", rulesPath,
         targetDir,
     ];
