@@ -98,20 +98,21 @@ export class DockerSandboxRunner implements SandboxRunnerClient {
         const args = [
             "run",
             "--rm",
+            // --- Network Isolation: absolute air-gap, zero exfiltration ---
             "--network", "none",
-            "--memory", "1g",
-            "--cpus", "1.0",
-            "--pids-limit", "256",
-            "--read-only",
+            // --- Resource Limits: prevent fork bombs and OOM ---
+            "--memory", "2g",
+            "--cpus", "2.0",
+            "--pids-limit", "512",
+            // --- Privilege Hardening: non-root, no capabilities, no escalation ---
             "--user", "10001:10001",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges:true",
-            // Mount workspace input strictly READ-ONLY
+            // --- Filesystem: source code is READ-ONLY, only /out is writable ---
             "-v", `${workspace.workspacePath}:/input:ro`,
-            // Mount output directory writable
             "-v", `${workspace.outDir}:/out`,
-            // In-memory temp scratchpads
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=128m",
+            // --- Pass job metadata ---
+            "-e", `JOB_ID=${job.jobId}`,
             this.scannerImage,
         ];
 

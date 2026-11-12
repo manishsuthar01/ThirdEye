@@ -30,12 +30,19 @@ export async function createJobWorkspace(job: ScanJob): Promise<EphemeralWorkspa
         headDir,
         outDir,
         cleanup: async () => {
-            try {
-                await fs.rm(workspacePath, { recursive: true, force: true });
-                console.log(`[JobManager] Cleaned up workspace: ${workspacePath}`);
-            } catch (err) {
-                console.error(`[JobManager] Failed to clean up workspace ${workspacePath}:`, err);
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    await fs.rm(workspacePath, { recursive: true, force: true });
+                    console.log(`[JobManager] Cleaned up workspace: ${workspacePath}`);
+                    return;
+                } catch (err) {
+                    if (attempt === 3) {
+                        console.error(`[JobManager] Failed to clean up workspace ${workspacePath}:`, err);
+                    } else {
+                        await new Promise((r) => setTimeout(r, 1000));
+                    }
+                }
             }
-        },
+        }
     };
 }
