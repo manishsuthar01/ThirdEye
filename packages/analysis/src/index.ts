@@ -9,4 +9,5 @@ export * from "./types";
 export * from "./ast/engine";
 export * from "./ast/rules";
 export * from "./diff/parser";
+export * from "./delta";
 export * from "./scorer";
