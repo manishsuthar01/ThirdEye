@@ -78,13 +78,18 @@ GitHub App / Vercel Webhooks
 │ • Gate: BLOCK / WARN / PASS  │             │
 └─────────────┬────────────────┘             │
               │                              │
-              ▼                              │
-┌──────────────────────────────┐             │
-│ Feedback & Deployment Gate   │             │
-│ • GitHub Check Run API       │             │
-│ • Commit Status API (Fallback│             │
-│ • PR Markdown Comment Report │             │
-└──────────────────────────────┘             │
+       ┌──────┴──────────────────────┐       │
+       │ (Immediate Path)            │ (Async│Job)
+       ▼                             ▼       │
+┌──────────────────────────────┐ ┌───────────┴──────────────────┐
+│ Step 1: Immediate Gate       │ │ Step 2: Async Gemini Pipeline │
+│ • Commit Status API (Fast)   │ │ • Grounded Semantic Triage    │
+│ • Initial PR Check Comment   │ │ • Reachability Analysis       │
+└──────────────┬───────────────┘ │ • Patch Diff Synthesis        │
+               │                 └───────────┬───────────────────┘
+               │ (Updates Comment with AI)   │
+               ◄─────────────────────────────┘
+                                             │
                                              ▼
                               ┌──────────────────────────┐
                               │ packages/database        │
@@ -122,20 +127,30 @@ GitHub App / Vercel Webhooks
 - Formats executive Markdown dashboards and line-level diff annotations.
 - **Dual-Channel Reporting**:
   - Attempts the **GitHub Checks API** first.
-  - Automatically falls back to the **Commit Status API** (setting red `❌ failure` on the commit) and the **PR Comments API** (posting the full Markdown summary table) when authenticating via Personal Access Tokens (PATs).
+  - Automatically falls back to the **Commit Status API** (setting commit status to `failure`) and the **PR Comments API** (posting the full Markdown summary table) when authenticating via Personal Access Tokens (PATs).
 
 ---
 
 ## 4. Next Development Phases
 
-```text
-Phase B: Persistence & Observability
-├── Phase 1: Database Persistence (@thirdeye/database)
-│   └── Persist Repositories, ScanJobs, Findings, and SecurityDeltas to PostgreSQL via Prisma.
-├── Phase 2: Production Incident & Telemetry Ingestion
-│   └── Ingest Vercel deployment events and runtime error telemetry (Sentry / OpenTelemetry).
-├── Phase 3: Incident Correlation Engine
-│   └── Correlate runtime error surges to deployment commit SHAs, authors, and time-windows.
-└── Phase 4: Next.js Real-Time Observability Web Dashboard (@thirdeye/web)
-    └── Visual timeline correlating deployments, security regressions, and production incidents.
-```
+### Milestone 5: AI-Assisted Security Investigation & Automated Remediation (Google Gemini)
+- **Asynchronous Post-Gate Execution**: Runs asynchronously *after* the fast GitHub commit status and initial gate comment are published, preventing LLM latency or API timeouts from delaying CI/CD gating.
+- **Provider & Model**: Powered by Google Gemini (`gemini-2.5-flash`) utilizing native structured output (`responseSchema`) for deterministic JSON payloads.
+- **Grounded Semantic Triage**: Eliminates hallucinated findings by grounding analysis exclusively on deterministic candidate regressions emitted by Stage 2/3 (OpenGrep and Trivy).
+- **Reachability Analysis**: Evaluates surrounding AST/call context to determine if untrusted user input actually reaches the flagged sink.
+- **Contextual Exploit Path Explanation**: Synthesizes human-readable explanations tailored to the specific application framework (e.g. Next.js, Express, Prisma).
+- **Automated Patch Generation**: Synthesizes ready-to-merge unified diffs that safely remediate the regression.
+- **Comment Enrichment**: Asynchronously updates the PR comment (`PATCH /repos/:owner/:repo/issues/comments/:id`) with the synthesized explanation cards and remediation diffs.
+
+### Milestone 6: Database Persistence & History (`packages/database`)
+- Persist Repositories, ScanJobs, Findings, and SecurityDeltas to PostgreSQL via Prisma ORM.
+- Track historical security posture, vulnerability resolution rates, and branch metrics over time.
+
+### Milestone 7: Production Telemetry & Deployment Correlation
+- Ingest Vercel deployment webhooks and runtime error telemetry (Sentry / OpenTelemetry).
+- Group production exceptions using stack-frame hashing.
+- Correlate error surges occurring within a post-deployment window directly to the offending commit SHA, author, and pull request.
+
+### Milestone 8: Next.js Real-Time Observability Web Dashboard (`apps/web`)
+- Unified web interface displaying live deployment feeds, security gate history, and incident correlation timelines.
+- Real-time progress streaming for in-flight sandbox scanning jobs.

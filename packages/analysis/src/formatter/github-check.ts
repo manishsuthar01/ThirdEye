@@ -86,7 +86,13 @@ export function formatMarkdownSummary(
     gate: GateDecision,
     jobId: string
 ): string {
-    const icon = gate.verdict === "BLOCK" ? "❌" : gate.verdict === "WARN" ? "⚠️" : "✅";
+    const verdictTag =
+        gate.verdict === "BLOCK"
+            ? "[FAILED]"
+            : gate.verdict === "WARN"
+                ? "[WARNING]"
+                : "[PASSED]";
+
     const conclusionText =
         gate.verdict === "BLOCK"
             ? "**Deployment Blocked:** New security regressions were introduced in this pull request."
@@ -94,22 +100,22 @@ export function formatMarkdownSummary(
                 ? "**Deployment Warning:** Medium-risk findings detected. Review before merging."
                 : "**Security Check Passed:** No new security regressions detected.";
 
-    let md = `## ${icon} ThirdEye Security Gate: \`${gate.verdict}\`\n\n`;
+    let md = `## ThirdEye Security Gate: ${verdictTag} \`${gate.verdict}\`\n\n`;
     md += `${conclusionText}\n\n`;
 
     // Overview Table
-    md += `### 📊 Analysis Summary\n\n`;
+    md += `### Analysis Summary\n\n`;
     md += `| Metric | Count | Description |\n`;
     md += `| :--- | :--- | :--- |\n`;
-    md += `| 🚨 **New Regressions** | \`${delta.new.length}\` | Issues introduced in this PR |\n`;
-    md += `| 📈 **Worsened Issues** | \`${delta.worsened.length}\` | Existing issues with escalated severity |\n`;
-    md += `| 🛠️ **Resolved Fixes** | \`${delta.resolved.length}\` | Pre-existing debt eliminated by this PR |\n`;
-    md += `| 📦 **Persistent Tech Debt** | \`${delta.persistent.length}\` | Existing baseline issues (not blocking) |\n`;
-    md += `| ⚖️ **Deployment Risk Score** | \`${gate.score} pts\` | Weighted regression score |\n\n`;
+    md += `| **New Regressions** | \`${delta.new.length}\` | Issues introduced in this PR |\n`;
+    md += `| **Worsened Issues** | \`${delta.worsened.length}\` | Existing issues with escalated severity |\n`;
+    md += `| **Resolved Fixes** | \`${delta.resolved.length}\` | Pre-existing debt eliminated by this PR |\n`;
+    md += `| **Persistent Tech Debt** | \`${delta.persistent.length}\` | Existing baseline issues (not blocking) |\n`;
+    md += `| **Deployment Risk Score** | \`${gate.score} pts\` | Weighted regression score |\n\n`;
 
     // Gate reasons
     if (gate.reasons.length > 0) {
-        md += `### 🛑 Gating Reasons\n\n`;
+        md += `### Gating Reasons\n\n`;
         for (const reason of gate.reasons) {
             md += `- ${reason}\n`;
         }
@@ -118,7 +124,7 @@ export function formatMarkdownSummary(
 
     // Regressions Table
     if (delta.new.length > 0) {
-        md += `### 🚨 Regressions Introduced (Fix Required)\n\n`;
+        md += `### Regressions Introduced (Fix Required)\n\n`;
         md += `| Severity | Rule ID | File | Description |\n`;
         md += `| :--- | :--- | :--- | :--- |\n`;
 
@@ -135,7 +141,7 @@ export function formatMarkdownSummary(
 
     // Resolved Table
     if (delta.resolved.length > 0) {
-        md += `### 🎉 Security Improvements (Resolved)\n\n`;
+        md += `### Security Improvements (Resolved)\n\n`;
         for (const item of delta.resolved.slice(0, 10)) {
             md += `- **[${item.severity.toUpperCase()}]** \`${item.ruleId}\` in \`${item.location.file}\`\n`;
         }
