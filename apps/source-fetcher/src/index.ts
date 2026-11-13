@@ -31,40 +31,57 @@ export async function downloadAndExtractSnapshot(
     const url = `https://api.github.com/repos/${owner}/${repo}/tarball/${sha}`;
     console.log(`[SourceFetcher] Downloading ${owner}/${repo}@${sha} into ${targetDir}...`);
 
-    const response = await fetch(url, {
-        headers: {
-            "User-Agent": "ThirdEye-SourceFetcher",
-            "Accept": "application/vnd.github.v3+json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-    });
+    let lastError: Error | null = null;
+    const maxRetries = 3;
 
-    if (!response.ok || !response.body) {
-        throw new Error(`[SourceFetcher] Failed to fetch tarball: HTTP ${response.status} ${response.statusText}`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    "User-Agent": "ThirdEye-SourceFetcher",
+                    "Accept": "application/vnd.github.v3+json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+            });
+
+            if (!response.ok || !response.body) {
+                throw new Error(`[SourceFetcher] HTTP ${response.status} ${response.statusText}`);
+            }
+
+            // Spawn GNU tar process to extract directly from HTTP stream
+            const tarProcess = spawn("tar", ["-xz", "-C", targetDir, "--strip-components=1"]);
+
+            // @ts-ignore
+            const nodeStream = Readable.fromWeb(response.body as any);
+            nodeStream.pipe(tarProcess.stdin);
+
+            await new Promise<void>((resolve, reject) => {
+                tarProcess.on("close", (code) => {
+                    if (code === 0) {
+                        console.log(`[SourceFetcher] Extracted snapshot into ${targetDir}`);
+                        resolve();
+                    } else {
+                        reject(new Error(`[SourceFetcher] tar process failed with exit code ${code}`));
+                    }
+                });
+
+                tarProcess.on("error", (err) => {
+                    reject(new Error(`[SourceFetcher] Failed to spawn tar process: ${err.message}`));
+                });
+            });
+
+            return; // Success!
+        } catch (err: any) {
+            lastError = err;
+            console.warn(`[SourceFetcher] Attempt ${attempt}/${maxRetries} failed: ${err.message}`);
+            if (attempt < maxRetries) {
+                const backoffMs = attempt * 1500;
+                await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            }
+        }
     }
 
-    // Spawn the OS tar process to extract directly from stdin
-    const tarProcess = spawn("tar", ["-xz", "-C", targetDir, "--strip-components=1"]);
-
-    // Stream the HTTP response body directly into the tar process standard input
-    // @ts-ignore
-    const nodeStream = Readable.fromWeb(response.body as any);
-    nodeStream.pipe(tarProcess.stdin);
-
-    return new Promise<void>((resolve, reject) => {
-        tarProcess.on("close", (code) => {
-            if (code === 0) {
-                console.log(`[SourceFetcher] Extracted snapshot into ${targetDir}`);
-                resolve();
-            } else {
-                reject(new Error(`[SourceFetcher] tar process failed with exit code ${code}`));
-            }
-        });
-
-        tarProcess.on("error", (err) => {
-            reject(new Error(`[SourceFetcher] Failed to spawn tar process: ${err.message}`));
-        });
-    });
+    throw new Error(`[SourceFetcher] Failed to fetch and extract snapshot after ${maxRetries} attempts: ${lastError?.message}`);
 }
 
 async function main(): Promise<void> {

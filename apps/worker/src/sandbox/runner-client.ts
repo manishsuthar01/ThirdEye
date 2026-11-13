@@ -45,6 +45,8 @@ export class DockerSandboxRunner implements SandboxRunnerClient {
         const args: string[] = [
             "run",
             "--rm",
+            "--dns", "8.8.8.8",
+            "--dns", "1.1.1.1",
             "-v", `${workspace.workspacePath}:/workspace`,
             "-e", `CLONE_URL=${job.repository.cloneUrl}`,
             "-e", `BASE_SHA=${job.revisions.baseSha || 'main'}`,
