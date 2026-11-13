@@ -1,3 +1,17 @@
+import fs from "node:fs";
+import path from "node:path";
+
+// Automatically load root .env if present
+const rootEnvPath = path.resolve(process.cwd(), ".env");
+const monorepoEnvPath = path.resolve(process.cwd(), "../../.env");
+
+for (const envPath of [rootEnvPath, monorepoEnvPath]) {
+  if (fs.existsSync(envPath) && typeof (process as any).loadEnvFile === "function") {
+    (process as any).loadEnvFile(envPath);
+    break;
+  }
+}
+
 const PORT = process.env.API_PORT || 4000;
 const HOST = process.env.API_HOST || "0.0.0.0";
 
