@@ -8,239 +8,170 @@ Developer-First AppSec, Deployment Observability, and Incident Correlation Platf
 
 ThirdEye bridges the operational gap between **pull request security**, **code deployments**, and **production health**. Modern production incidents and security regressions are overwhelmingly introduced by new code pushes, database migrations, or configuration releases.
 
-ThirdEye continuously monitors pull requests and deployments from GitHub and Vercel. It executes static security analysis inside **zero-trust compartmentalized sandboxes**, computes the **Security Delta** (Base vs. Head revision), and correlates production anomalies to the exact commit, author, and pull request that triggered them.
+ThirdEye continuously monitors pull requests and deployments from GitHub and Vercel. It executes static application security testing (SAST) and software composition analysis (SCA) inside **zero-trust compartmentalized Docker sandboxes**, computes the **Differential Security Delta** (Base vs. Head revision), blocks regressions via an automated deployment gate, and reports real-time feedback back to GitHub.
 
 ---
 
-## System Architecture
+## Key Highlights
+
+- 🛡️ **Zero-Trust Compartmentalized Sandboxing**: Two-stage container execution separates network-enabled source fetching (`thirdeye-source-fetcher`) from an air-gapped, non-root, read-only scanning container (`thirdeye-scanner-runner` with `--network none`).
+- ⚖️ **Differential Delta Analysis**: Ignores pre-existing technical debt on the target branch and focuses exclusively on **net-new security regressions** introduced in the pull request.
+- 🚦 **Automated Deployment Gate**: Evaluates risk scores using weighted severity scoring (Critical=10, High=5, Medium=2, Low=1) to deterministically output `BLOCK`, `WARN`, or `PASS`.
+- 💬 **Dual-Channel GitHub Feedback**: Automatically posts Commit Statuses (`success`/`failure`) and rich Markdown summary dashboards to GitHub Pull Requests, supporting both GitHub Apps and standard Personal Access Tokens.
+- 📦 **Air-Gapped Tooling**: Pre-caches Trivy vulnerability databases and OpenGrep SAST engines to run completely offline without external network dependencies.
+
+---
+
+## Architecture Flow
 
 ```text
-GitHub App / Vercel Webhooks
-           │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│ apps/api: Fast Ingestion Gateway (Express / Node.js)    │
-│ • HMAC SHA-256 Signature Verification                   │
-│ • Adapter Normalization (PRs: opened, sync, reopen)     │
-│ • Fast Non-Blocking Acknowledgment (HTTP 202 Accepted)  │
-└────────────────────────────┬────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────┐
-│ packages/queue: AMQP Message Broker (RabbitMQ)          │
-│ • Exchange: thirdeye.events (Topic)                     │
-│ • Routing Keys: deployment.github.#, error.#, incident.#│
-│ • Dead-Letter Handling: thirdeye.dlx -> DLQ             │
-└──────────────┬───────────────────────────┬──────────────┘
-               │                           │
-               ▼                           ▼
-┌───────────────────────────────┐  ┌───────────────────────┐
-│ apps/worker: Orchestrator     │  │ Error / Correlation   │
-│ • Manages Sandbox Lifecycle   │  │ Workers               │
-│ • Enforces Timeouts & Cleanup │  │ • Error Grouping      │
-│ • Never runs untrusted code   │  │ • Time-Window Match   │
-└──────────────┬────────────────┘  └───────────┬───────────┘
-               │                               │
-               ▼                               │
-┌───────────────────────────────┐              │
-│ Compartment 1: Source Fetcher │              │
-│ • Read-Only Scoped Token      │              │
-│ • Downloads Base & Head trees │              │
-└──────────────┬────────────────┘              │
-               │ (Writes to ephemeral mount)   │
-               ▼                               │
-┌───────────────────────────────┐              │
-│ Compartment 2: Scanner Runner │              │
-│ • STRICT ISOLATION (--net none│              │
-│ • Read-only rootfs, unpriv UID│              │
-│ • Offline OpenGrep & Trivy    │              │
-│ • Emits canonical JSON report │              │
-└──────────────┬────────────────┘              │
-               │                               │
-               └───────────────┬───────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│ packages/analysis: Security Intelligence & Comparison   │
-│ • Resilient Fingerprinting (tolerant to line drift)     │
-│ • Security Delta Engine: Base vs. Head Diff             │
-│   -> Categorizes: New (Regressions), Resolved, Debt     │
-│ • Future: Custom Cross-Layer AST Authorization Engine   │
-└──────────────────────────────┬──────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│ packages/database: Persistence Layer (PostgreSQL)       │
-│ • Scan Result Snapshot Cache (repoId, commitSHA, hash)  │
-│ • Relational Source of Truth (Deployments, Incidents)   │
-└──────────────────────────────┬──────────────────────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                ▼                             ▼
-┌───────────────────────────────┐ ┌───────────────────────┐
-│ GitHub Checks API Dispatcher  │ │ apps/web: Dashboard   │
-│ • PR Annotations & Summaries  │ │ • Unified Timeline    │
-│ • Block / Warn on Regressions │ │ • Incident Tracking   │
-└───────────────────────────────┘ └───────────────────────┘
+GitHub PR Event (opened / synchronize / reopened)
+                      │
+                      ▼
+┌────────────────────────────────────────────────────────┐
+│ apps/api: Fast Ingress Gateway (Express / Node.js)     │
+│ • Supports application/json and form-urlencoded        │
+│ • Validates payload & publishes to RabbitMQ            │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ packages/queue: AMQP Message Broker (RabbitMQ)         │
+│ • Routing Key: deployment.github.pull_request          │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ apps/worker: Pipeline Orchestrator                     │
+│ • Allocates isolated ephemeral workspace on disk       │
+└───────────────────────────┬────────────────────────────┘
+                            │
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+┌───────────────────────────┐ ┌──────────────────────────┐
+│ Stage 1: Source Fetcher   │ │ Stage 2: Scanner Runner  │
+│ (thirdeye-source-fetcher) │ │ (thirdeye-scanner-runner)│
+│ • Network: Bridge         │ │ • Network: none (offline)│
+│ • Streams base & head     │ │ • User: 10001:10001      │
+│   tarballs via GNU tar    │ │ • Runs OpenGrep & Trivy  │
+└───────────────────────────┘ └───────────┬──────────────┘
+                                          │
+                                          ▼
+                              ┌──────────────────────────┐
+                              │ packages/analysis        │
+                              │ • Computes SecurityDelta │
+                              │ • Evaluates Gate Decision│
+                              └───────────┬──────────────┘
+                                          │
+                                          ▼
+                              ┌──────────────────────────┐
+                              │ GitHub PR Feedback       │
+                              │ • ❌ Commit Status       │
+                              │ • 💬 Markdown Report     │
+                              └──────────────────────────┘
 ```
 
 ---
 
-## Core Capabilities
-
-### 1. High-Throughput Webhook Ingestion
-- **Zero-SDK Ingestion**: Consumes native webhook events directly from GitHub (pull requests, pushes) and Vercel (deployments).
-- **Cryptographic Verification**: Validates incoming payloads using HMAC SHA-256 signatures before deserialization.
-- **Sub-10ms Gatekeeper**: Deserializes and publishes normalized events to the broker, returning `202 Accepted` immediately to prevent upstream webhook timeouts.
-
-### 2. Message Broker Architecture (`packages/queue`)
-- **Protocol**: AMQP 0-9-1 using `amqplib`.
-- **Topic Exchange Topology**: Hierarchical routing keys (e.g., `deployment.github.pull_request`, `error.runtime`).
-- **Flow Control & Backpressure**: Consumers configure explicit QoS prefetch limits (`channel.prefetch(5)`) to prevent worker memory exhaustion during PR bursts.
-- **Fault Tolerance**: Unrecoverable/poison-pill messages are rejected without requeue (`requeue: false`) and routed through `thirdeye.dlx` to `thirdeye.failed_events_dlq`.
-
-### 3. Compartmentalized Zero-Trust Sandboxing
-- **Separation of Source Acquisition and Analysis**:
-  - **`source-fetcher`**: Operates with restricted HTTPS network egress and a short-lived read-only GitHub token to download Base and Head snapshots. Never executes repository code.
-  - **`scanner-runner`**: Runs with `--network none`, stripped Linux capabilities (`--cap-drop ALL`), non-root user (`10001:10001`), read-only root filesystem, and no credentials whatsoever.
-- **Deterministic Offline Scanning**: Trivy vulnerability database and OpenGrep rulesets are pre-baked into container images, enabling instant, reproducible offline scanning without internet access.
-
-### 4. Intelligence & Security Delta Engine (`packages/analysis`)
-- **Resilient Fingerprinting**: Hashes `ruleId + normalizedRelativePath + codeSink` so line shifts do not produce false-positive alerts.
-- **Two-Snapshot Security Delta**: Classifies findings into:
-  - **New**: Introduced in this PR (regressions that block/warn).
-  - **Resolved**: Pre-existing issues fixed by this PR.
-  - **Persistent**: Pre-existing technical debt.
-- **Snapshot Caching**: Caches scan outputs by `(repoId, commitSHA, configHash)` to reuse Base scans across multiple PRs.
-
-### 5. Root-Cause Incident Correlation (Long-Term)
-- **Time-Window Correlation**: Evaluates error rate surges starting within $X$ minutes of a deployment completion.
-- **Unified Timeline**: Connects production incidents directly to the responsible commit SHA, author, and pull request.
-
----
-
-## Monorepo Workspace Topology
-
-The repository is organized as a `pnpm` monorepo separating infrastructure, orchestration, and pure domain logic:
+## Monorepo Layout
 
 ```text
-ThirdEye/
+thirdeye/
 ├── apps/
-│   ├── api/            # Webhook ingestion server (Express, TypeScript)
-│   ├── worker/         # Event consumer and sandbox orchestrator
-│   ├── web/            # Observability dashboard (Next.js App Router, TailwindCSS)
-│   ├── source-fetcher/ # Ephemeral container for fetching repository snapshots
-│   └── scanner-runner/ # Ephemeral zero-network container running OpenGrep & Trivy
-│
-├── packages/
-│   ├── analysis/       # Security delta engine, fingerprinting, and rule normalization
-│   ├── queue/          # RabbitMQ connection manager, topology, and contracts
-│   ├── database/       # PostgreSQL schema, migrations, and query clients
-│   └── types/          # Shared domain models and canonical event interfaces
-│
-├── docs/               # Technical specifications and architectural deep dives
-├── docker-compose.yml  # Local infrastructure (PostgreSQL, RabbitMQ)
-└── pnpm-workspace.yaml
+│   ├── api/             # Express webhook ingestion service (Port 4000)
+│   ├── worker/          # RabbitMQ consumer & Docker sandbox orchestrator
+│   ├── source-fetcher/  # Stage 1: Networked archive acquisition container
+│   ├── scanner-runner/  # Stage 2: Air-gapped OpenGrep + Trivy sandbox container
+│   └── web/             # Next.js observability dashboard
+└── packages/
+    ├── analysis/        # Delta calculation, risk scoring, and GitHub formatters
+    ├── queue/           # RabbitMQ connection manager & channel wrappers
+    ├── database/        # PostgreSQL client & Prisma ORM schemas
+    └── types/           # Shared TypeScript domain contracts
 ```
 
 ---
 
-## Tech Stack
-
-| Domain | Technology | Rationale |
-| :--- | :--- | :--- |
-| **Monorepo** | pnpm Workspaces, TypeScript 5 | Strict workspace boundaries, shared types, fast builds |
-| **API Ingestion** | Node.js, Express | Lightweight, low-latency HTTP request processing |
-| **Worker Engine** | Node.js (Standalone Process) | Decoupled background processing with prefetch control |
-| **Static Analysis (SAST)**| OpenGrep | Structural code pattern matching and intrafile taint analysis |
-| **Dependency & Secrets** | Trivy | Industry-standard lockfile and credential scanning |
-| **Sandboxing** | Docker (Ephemeral `--rm`) | Zero-trust container execution with `--network none` |
-| **Message Broker** | RabbitMQ (AMQP 0-9-1) | Durable queues, topic routing, native DLX support |
-| **Primary Database** | PostgreSQL 16 | ACID transactions, strict relational consistency |
-| **Frontend** | Next.js (App Router), React, Tailwind | Server components, real-time timeline visualization |
-
----
-
-## Getting Started
+## Quickstart & Local Development
 
 ### Prerequisites
-- **Node.js**: v20 or higher
-- **pnpm**: v9 or higher
-- **Docker**: For running local PostgreSQL and RabbitMQ instances and executing scanner sandboxes
 
-### 1. Clone & Install Dependencies
+- **Node.js**: `v20.x` or later
+- **pnpm**: `v9.x`
+- **Docker Desktop**: With Linux containers enabled
+- **RabbitMQ**: Running on port `5672` (or via `docker compose up -d rabbitmq`)
 
-```bash
-git clone https://github.com/manishsuthar01/ThirdEye.git
-cd ThirdEye
+### 1. Install Dependencies
+
+```powershell
 pnpm install
 ```
 
-### 2. Start Local Infrastructure
+### 2. Configure Environment
 
-Spin up PostgreSQL and RabbitMQ using Docker Compose:
+Copy `.env.example` to `.env`:
 
-```bash
-docker compose up -d
+```powershell
+cp .env.example .env
 ```
 
-- **PostgreSQL**: `localhost:5432`
-- **RabbitMQ AMQP**: `localhost:5672`
-- **RabbitMQ Management UI**: `http://localhost:15672` (Default credentials: `thirdeye` / `thirdeye`)
-
-### 3. Configure Environment Variables
-
-Create `.env` in the project root:
-
-```env
-# Application
-PORT=4000
-WORKER_CONCURRENCY=5
-
-# PostgreSQL
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thirdeye
-
-# RabbitMQ
+Ensure `.env` contains:
+```ini
 RABBITMQ_URL=amqp://thirdeye:thirdeye@localhost:5672
-RABBITMQ_EXCHANGE=thirdeye.events
-RABBITMQ_DLX_EXCHANGE=thirdeye.dlx
-
-# Webhook Secrets
-GITHUB_WEBHOOK_SECRET=your_github_webhook_secret
-VERCEL_WEBHOOK_SECRET=your_vercel_webhook_secret
-
-# GitHub App Integration
-GITHUB_APP_ID=your_app_id
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
+API_PORT=4000
+GITHUB_TOKEN=your_personal_access_token_here
 ```
 
-### 4. Run Services in Development
+### 3. Build Docker Sandbox Images
 
-You can run individual workspace apps concurrently:
+Build the two sandboxed container images:
 
-```bash
-# Ingestion API server
-pnpm dev:api
+```powershell
+# 1. Build Stage 1 (Source Fetcher)
+docker build -f apps/source-fetcher/Dockerfile -t thirdeye-source-fetcher:latest .
 
-# Background Worker
+# 2. Build Stage 2 (Scanner Runner)
+docker build -f apps/scanner-runner/Dockerfile -t thirdeye-scanner-runner:latest .
+```
+
+### 4. Start Background Services
+
+Open two terminals:
+
+**Terminal 1 (Worker):**
+```powershell
 pnpm dev:worker
+```
 
-# Next.js Dashboard
-pnpm dev:web
+**Terminal 2 (API Gateway):**
+```powershell
+pnpm dev:api
 ```
 
 ---
 
-## Architectural Documentation
+## Testing Differential Analysis
 
-For comprehensive engineering specifications, refer to:
-- [System Design & Architecture Specification](architecture.md)
-- [Worker Architecture & Security Analysis Pipeline](docs/SECURITY_ANALYSIS_PIPELINE.md)
-- [Monorepo Design & Trade-offs](MONOREPO_GUIDE.md)
-- [Distributed Systems Edge Cases & Failure Modes](EDGE_CASES.md)
+Simulate a GitHub Pull Request event using PowerShell:
 
----
+```powershell
+$payload = @{
+    action = "opened"
+    repository = @{
+        full_name = "facebook/react"
+        clone_url = "https://github.com/facebook/react.git"
+        default_branch = "main"
+    }
+    pull_request = @{
+        number = 1
+        base = @{ sha = "main" }
+        head = @{ sha = "main" }
+    }
+} | ConvertTo-Json -Depth 5
 
-## License
-
-This project is licensed under the MIT License.
+Invoke-RestMethod -Uri "http://localhost:4000/api/webhooks/github" `
+  -Method Post `
+  -Headers @{ "X-GitHub-Event" = "pull_request" } `
+  -Body $payload `
+  -ContentType "application/json"
+```
