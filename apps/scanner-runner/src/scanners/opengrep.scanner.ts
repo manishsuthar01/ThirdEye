@@ -13,6 +13,7 @@ export async function runOpenGrep(
         "scan",
         "--json",
         "--quiet",
+        "--no-git-ignore",
         "--config", rulesPath,
         targetDir,
     ];
