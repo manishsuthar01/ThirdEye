@@ -11,3 +11,4 @@ export * from "./ast/rules";
 export * from "./diff/parser";
 export * from "./delta";
 export * from "./scorer";
+export * from "./formatter/github-check";
