@@ -1,19 +1,126 @@
 rules:
-  - id: javascript.express.security.audit.cors.permissive-cors
-    pattern: cors({origin: '*'})
-    message: Permissive CORS configuration detected with wildcard origin.
-    languages: [javascript, typescript]
+  # =========================================================================
+  # 1. ARBITRARY CODE EXECUTION (RCE) & UNSAFE EVALUATION
+  # =========================================================================
+  - id: javascript.lang.security.audit.detect-eval
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: window.eval(...)
+          - pattern: global.eval(...)
+          - pattern: Function(...)
+          - pattern: new Function(...)
+    message: "Direct call to eval() or dynamic Function() constructor detected. Untrusted input passed here can lead to Remote Code Execution (RCE)."
+    languages: [javascript, typescript, js, ts]
+    severity: ERROR
+
+  - id: javascript.node.security.audit.child-process-exec
+    patterns:
+      - pattern-either:
+          - pattern: child_process.exec(...)
+          - pattern: exec(...)
+          - pattern: child_process.execSync(...)
+          - pattern: execSync(...)
+    message: "Potential Command Injection: exec() executes commands inside a shell. Prefer execFile() or spawn() with argument arrays to prevent command injection."
+    languages: [javascript, typescript, js, ts]
+    severity: ERROR
+
+  # =========================================================================
+  # 2. CROSS-SITE SCRIPTING (XSS) & DANGEROUS DOM MANIPULATION
+  # =========================================================================
+  - id: react.security.audit.dangerously-set-inner-html
+    patterns:
+      - pattern-either:
+          - pattern: |
+              <$EL dangerouslySetInnerHTML={...} />
+          - pattern: |
+              dangerouslySetInnerHTML: { __html: ... }
+    message: "Usage of dangerouslySetInnerHTML detected. Ensure content is sanitized with DOMPurify to prevent Cross-Site Scripting (XSS)."
+    languages: [javascript, typescript, js, ts]
     severity: WARNING
 
-  - id: javascript.lang.security.audit.detect-eval
-    pattern: eval(...)
-    message: Direct call to eval() detected. This can lead to arbitrary code execution.
-    languages: [javascript, typescript]
-    severity: ERROR
+  - id: javascript.browser.security.audit.document-write-innerhtml
+    patterns:
+      - pattern-either:
+          - pattern: document.write(...)
+          - pattern: document.writeln(...)
+          - pattern: $EL.innerHTML = ...
+          - pattern: $EL.outerHTML = ...
+    message: "Direct assignment to innerHTML/document.write can introduce DOM-based Cross-Site Scripting (XSS)."
+    languages: [javascript, typescript, js, ts]
+    severity: WARNING
 
+  # =========================================================================
+  # 3. SECRETS, CREDENTIALS & HARDCODED TOKENS
+  # =========================================================================
   - id: javascript.lang.security.audit.hardcoded-jwt-secret
-    pattern: jwt.sign($PAYLOAD, "...", ...)
-    message: Hardcoded JWT secret string detected. Use environment variables.
-    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: jwt.sign($PAYLOAD, "...", ...)
+          - pattern: jwt.verify($TOKEN, "...", ...)
+    message: "Hardcoded JWT secret detected. Secrets must be loaded from secure environment variables or a vault."
+    languages: [javascript, typescript, js, ts]
     severity: ERROR
 
+  - id: generic.security.audit.hardcoded-bearer-token
+    patterns:
+      - pattern-regex: "(Bearer\\s+[a-zA-Z0-9_\\-\\.~+/]+=*|ghp_[a-zA-Z0-9]{36}|xox[baprs]-[0-9a-zA-Z]{10,48}|AIza[0-9A-Za-z-_]{35})"
+    message: "Potential hardcoded API token or OAuth bearer credential detected."
+    languages: [javascript, typescript, js, ts, json, yaml]
+    severity: ERROR
+
+  # =========================================================================
+  # 4. INSECURE NETWORKING & CORS CONFIGURATION
+  # =========================================================================
+  - id: javascript.express.security.audit.cors.permissive-cors
+    patterns:
+      - pattern-either:
+          - pattern: "cors({origin: '*'})"
+          - pattern: "cors({origin: true})"
+          - pattern: 'res.setHeader("Access-Control-Allow-Origin", "*")'
+          - pattern: 'res.header("Access-Control-Allow-Origin", "*")'
+    message: "Overly permissive CORS policy allows arbitrary origins. This can lead to sensitive data theft via authenticated cross-origin requests."
+    languages: [javascript, typescript, js, ts]
+    severity: WARNING
+
+  - id: javascript.node.security.audit.disable-tls-reject-unauthorized
+    patterns:
+      - pattern-either:
+          - pattern: "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'"
+          - pattern: 'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"'
+          - pattern: 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"'
+          - pattern: 'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"'
+          - pattern: "{rejectUnauthorized: false}"
+          - pattern: "rejectUnauthorized: false"
+    message: "Disabling TLS certificate validation (rejectUnauthorized: false) makes network connections vulnerable to Man-In-The-Middle (MITM) attacks."
+    languages: [javascript, typescript, js, ts]
+    severity: ERROR
+
+  # =========================================================================
+  # 5. INSECURE CRYPTOGRAPHY & HASHING
+  # =========================================================================
+  - id: javascript.crypto.security.audit.insecure-hash-algorithm
+    patterns:
+      - pattern-either:
+          - pattern: crypto.createHash("md5")
+          - pattern: crypto.createHash("MD5")
+          - pattern: crypto.createHash("sha1")
+          - pattern: crypto.createHash("SHA1")
+    message: "Weak cryptographic hash function (MD5/SHA1) detected. Use SHA-256 or SHA-512 for integrity, and Argon2id/bcrypt for password hashing."
+    languages: [javascript, typescript, js, ts]
+    severity: WARNING
+
+  # =========================================================================
+  # 6. SQL & NOSQL INJECTION (TAINT & STRING CONCATENATION)
+  # =========================================================================
+  - id: javascript.database.security.audit.sql-string-concatenation
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query($SQL + ...)
+          - pattern: $DB.execute($SQL + ...)
+          - pattern: $DB.raw($SQL + ...)
+          - pattern: $DB.query(`...${...}...`)
+          - pattern: $DB.execute(`...${...}...`)
+    message: "Possible SQL Injection: SQL queries constructed with string concatenation or template literals. Use parameterized/prepared statements instead."
+    languages: [javascript, typescript, js, ts]
+    severity: ERROR
