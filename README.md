@@ -14,11 +14,11 @@ ThirdEye continuously monitors pull requests and deployments from GitHub and Ver
 
 ## Key Highlights
 
-- 🛡️ **Zero-Trust Compartmentalized Sandboxing**: Two-stage container execution separates network-enabled source fetching (`thirdeye-source-fetcher`) from an air-gapped, non-root, read-only scanning container (`thirdeye-scanner-runner` with `--network none`).
-- ⚖️ **Differential Delta Analysis**: Ignores pre-existing technical debt on the target branch and focuses exclusively on **net-new security regressions** introduced in the pull request.
-- 🚦 **Automated Deployment Gate**: Evaluates risk scores using weighted severity scoring (Critical=10, High=5, Medium=2, Low=1) to deterministically output `BLOCK`, `WARN`, or `PASS`.
-- 💬 **Dual-Channel GitHub Feedback**: Automatically posts Commit Statuses (`success`/`failure`) and rich Markdown summary dashboards to GitHub Pull Requests, supporting both GitHub Apps and standard Personal Access Tokens.
-- 📦 **Air-Gapped Tooling**: Pre-caches Trivy vulnerability databases and OpenGrep SAST engines to run completely offline without external network dependencies.
+- **Zero-Trust Compartmentalized Sandboxing**: Two-stage container execution separates network-enabled source fetching (`thirdeye-source-fetcher`) from an air-gapped, non-root, read-only scanning container (`thirdeye-scanner-runner` with `--network none`).
+- **Differential Delta Analysis**: Ignores pre-existing technical debt on the target branch and focuses exclusively on **net-new security regressions** introduced in the pull request.
+- **Automated Deployment Gate**: Evaluates risk scores using weighted severity scoring (Critical=10, High=5, Medium=2, Low=1) to deterministically output `BLOCK`, `WARN`, or `PASS`.
+- **Dual-Channel GitHub Feedback**: Automatically posts Commit Statuses (`success`/`failure`) and rich Markdown summary dashboards to GitHub Pull Requests, supporting both GitHub Apps and standard Personal Access Tokens.
+- **Air-Gapped Tooling**: Pre-caches Trivy vulnerability databases and OpenGrep SAST engines to run completely offline without external network dependencies.
 
 ---
 
@@ -66,8 +66,8 @@ GitHub PR Event (opened / synchronize / reopened)
                                           ▼
                               ┌──────────────────────────┐
                               │ GitHub PR Feedback       │
-                              │ • ❌ Commit Status       │
-                              │ • 💬 Markdown Report     │
+                              │ • Commit Status          │
+                              │ • Markdown Report        │
                               └──────────────────────────┘
 ```
 
