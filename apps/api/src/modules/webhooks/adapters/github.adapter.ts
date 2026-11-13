@@ -18,20 +18,38 @@ export const githubAdapter: WebhookAdapter = {
         const body = req.body;
         const repo = body?.repository;
 
+        console.log(`\n[GitHubAdapter] Processing event: "${event}"`);
+
         // Ignore ping events and malformed payloads without a repository
-        if (event === "ping" || !repo) return null;
+        if (event === "ping") {
+            console.log(`[GitHubAdapter] Ignored: Ping event received (hook setup confirmation)`);
+            return null;
+        }
+        if (!repo) {
+            console.warn(`[GitHubAdapter] Ignored: Request payload has no repository metadata`);
+            return null;
+        }
+
+        console.log(`[GitHubAdapter] Repository: ${repo.full_name}`);
 
         // 1. Pull Request Events
         if (event === "pull_request") {
             const action = body.action;
+            console.log(`[GitHubAdapter] PR Action: "${action}" (PR #${body.number})`);
 
             // Filter out non-code PR events (labels, assignments, reviews, etc.)
             if (!RELEVANT_PR_ACTIONS.has(action)) {
+                console.log(`[GitHubAdapter] Ignored: PR action "${action}" is not in code-scanning set (${Array.from(RELEVANT_PR_ACTIONS).join(", ")})`);
                 return null;
             }
 
             const pr = body.pull_request;
-            if (!pr) return null;
+            if (!pr) {
+                console.warn(`[GitHubAdapter] Ignored: "pull_request" event payload missing pull_request object`);
+                return null;
+            }
+
+            console.log(`[GitHubAdapter] Accepted: PR #${body.number} [${action}] Base: ${pr.base?.ref} (${pr.base?.sha?.slice(0, 7)}) -> Head: ${pr.head?.ref} (${pr.head?.sha?.slice(0, 7)})`);
 
             return {
                 provider: "github",
@@ -57,6 +75,9 @@ export const githubAdapter: WebhookAdapter = {
                 timestamp: pr.updated_at ? new Date(pr.updated_at) : new Date(),
             };
         }
+
+        console.log(`[GitHubAdapter] Ignored: Event "${event}" is not handled for security delta scanning`);
+        return null;
 
         // 2. Push Events
         if (event === "push") {
