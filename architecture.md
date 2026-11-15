@@ -45,7 +45,7 @@ GitHub App / Vercel Webhooks
               ▼                            ▼
 ┌──────────────────────────────┐ ┌───────────────────────┐
 │ apps/worker: Orchestrator    │ │ Error & Correlation   │
-│ • Receives PR Scan Job       │ │ Workers               │
+│ • Receives PR Scan Job       │ │ Workers (Planned)     │
 │ • Manages Sandbox Lifecycle  │ │ • Error Grouping      │
 │ • Ephemeral Workspace Backoff│ │ • Fingerprinting      │
 │ • Enforces Timeouts & Limits │ │ • Time-Window Match   │
@@ -131,7 +131,19 @@ GitHub App / Vercel Webhooks
 
 ---
 
-## 4. Next Development Phases
+## 4. Reconciling the Tri-Scanner Architecture
+
+ThirdEye's design incorporates three complementary scanning tiers, each addressing distinct security challenges. Documenting their current status prevents architectural confusion:
+
+| Tier | Engine / Approach | Status | Primary Responsibility |
+| :--- | :--- | :--- | :--- |
+| **Tier 1** | **Deterministic OpenGrep & Trivy Sandboxes** | **Implemented** | Air-gapped container running offline SAST and SCA. Generates baseline candidate findings and powers the immediate $O(N+M)$ security delta gate. |
+| **Tier 2** | **AI Semantic Investigation (Google Gemini)** | **Planned (Milestone 5)** | Runs asynchronously post-gate. Triages deterministic candidate regressions, verifies reachability, eliminates false positives, and synthesizes ready-to-merge patch diffs. |
+| **Tier 3** | **Custom TypeScript AST Engine** | **Planned (Prototyped Stub)** | Deep AST parsing using TypeScript Compiler API (`packages/analysis/src/ast/engine.ts`). Enforces framework-specific tenant isolation and ORM query constraints (BOLA/IDOR detection). |
+
+---
+
+## 5. Next Development Phases
 
 ### Milestone 5: AI-Assisted Security Investigation & Automated Remediation (Google Gemini)
 - **Asynchronous Post-Gate Execution**: Runs asynchronously *after* the fast GitHub commit status and initial gate comment are published, preventing LLM latency or API timeouts from delaying CI/CD gating.

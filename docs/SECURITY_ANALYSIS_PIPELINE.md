@@ -37,8 +37,14 @@ Worker Job Event
        │
        ▼
 [Stage 4: Feedback Loop]  (@thirdeye/worker)
-          • Sets Commit Status on GitHub (failure / success)
-          • Posts executive Markdown dashboard comment on PR discussion tab
+       │  • Sets Commit Status on GitHub (failure / success)
+       │  • Posts executive Markdown dashboard comment on PR discussion tab
+       │
+       ▼
+[Stage 5: Asynchronous AI Remediation (Planned Milestone 5)]  (Google Gemini)
+          • Asynchronous post-gate execution
+          • Semantic triage & reachability validation on deterministic candidate findings
+          • Synthesizes ready-to-merge unified diffs and updates PR comment via PATCH API
 ```
 
 ---

@@ -107,3 +107,21 @@ When a request comes into the Next.js frontend, hits the API, is published to Ra
 #### Learning Resources & References
 *   [OpenTelemetry Documentation](https://opentelemetry.io/)
 *   [Google Cloud: Distributed Tracing Concepts](https://cloud.google.com/trace/docs/overview)
+
+---
+
+## 7. Current Implementation Status Matrix
+
+The following matrix documents which resilience and edge-case mechanisms are currently implemented in the ThirdEye codebase versus architectural targets for future milestones:
+
+| Mechanism | Codebase Location | Status | Implementation Detail |
+| :--- | :--- | :--- | :--- |
+| **Dead-Letter Exchange (DLQ)** | `packages/queue/src/index.ts` | Implemented | Dead-letter exchange (`thirdeye.dlx`) bound to queue `thirdeye.failed_events_dlq`. Consumer exceptions trigger `channel.reject(msg, false)`. |
+| **Consumer Backpressure** | `apps/worker/src/worker.ts`, `packages/queue` | Implemented | Enforces flow control using `channel.prefetch(WORKER_CONCURRENCY)`. Prevents worker memory saturation during webhook bursts. |
+| **Ephemeral Workspace Cleanup** | `apps/worker/src/sandbox/job-manager.ts` | Implemented | `createJobWorkspace` isolates each scan on disk in `os.tmpdir()` and cleans up in a `finally` block with a 3-attempt exponential backoff loop. |
+| **Monotonic Timing & Census** | `apps/worker/src/orchestrators/scan-pipeline.ts` | Implemented | Microsecond-precision timings via `performance.now()`; recursive filesystem census on target snapshots. |
+| **Signature Verification** | `apps/api/src/middleware/verify-github.ts` | Implemented | HMAC SHA-256 verification using `crypto.timingSafeEqual`. |
+| **Idempotency Deduplication** | `apps/api`, `apps/worker` | Planned | Currently, webhooks generate a `triggerId` but are not deduplicated against a persistent store prior to sandbox execution. |
+| **API Rate Limiting** | `apps/api` | Planned | Rate limiting proxies or token-bucket middleware are planned for production multi-tenant deployments. |
+| **Distributed W3C Tracing** | Monorepo-wide | Planned | Component tag logs (`[API]`, `[Pipeline]`, `[DockerRunner]`) are in place; structured JSON tracing across OpenTelemetry is planned for Phase 7. |
+
