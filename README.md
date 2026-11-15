@@ -19,6 +19,8 @@ ThirdEye continuously monitors pull requests and deployments from GitHub and Ver
 - **Automated Deployment Gate**: Evaluates risk scores using weighted severity scoring (Critical=10, High=5, Medium=2, Low=1) to deterministically output `BLOCK`, `WARN`, or `PASS`.
 - **Dual-Channel GitHub Feedback**: Automatically posts Commit Statuses (`success`/`failure`) and rich Markdown summary dashboards to GitHub Pull Requests, supporting both GitHub Apps and standard Personal Access Tokens.
 - **Air-Gapped Tooling**: Pre-caches Trivy vulnerability databases and OpenGrep SAST engines to run completely offline without external network dependencies.
+- **Grounded AI Remediation (Planned Milestone 5)**: Post-gate asynchronous triage powered by Google Gemini (`gemini-2.5-flash`) to evaluate candidate reachability and synthesize ready-to-merge remediation patch diffs without delaying CI checks.
+- **Reproducible Performance Benchmarking**: Built-in test harness (`scripts/benchmark.ts`) tracking monotonic execution durations, filesystem census, and memory usage across sequential and concurrent runs.
 
 ---
 
@@ -38,6 +40,7 @@ GitHub PR Event (opened / synchronize / reopened)
 ┌────────────────────────────────────────────────────────┐
 │ packages/queue: AMQP Message Broker (RabbitMQ)         │
 │ • Routing Key: deployment.github.pull_request          │
+│ • Dead-Letter Safety: thirdeye.dlx -> DLQ              │
 └───────────────────────────┬────────────────────────────┘
                             │
                             ▼
@@ -63,12 +66,15 @@ GitHub PR Event (opened / synchronize / reopened)
                               │ • Evaluates Gate Decision│
                               └───────────┬──────────────┘
                                           │
-                                          ▼
-                              ┌──────────────────────────┐
-                              │ GitHub PR Feedback       │
-                              │ • Commit Status          │
-                              │ • Markdown Report        │
-                              └──────────────────────────┘
+                       ┌──────────────────┴──────────────────┐
+                       │ (Immediate Synchronous Path)        │ (Async Post-Gate)
+                       ▼                                     ▼
+       ┌──────────────────────────────┐       ┌──────────────────────────────┐
+       │ GitHub Gate Feedback         │       │ Async AI Pipeline (Gemini)   │
+       │ • Sets Commit Status (Fast)  │       │ • Grounded Semantic Triage   │
+       │ • Posts Initial PR Comment   │◄──────┤ • Reachability Analysis      │
+       └──────────────────────────────┘ (Appends│ • Patch Diff Synthesis      │
+                                        Remediation)└────────────────────────┘
 ```
 
 ---
@@ -82,12 +88,14 @@ thirdeye/
 │   ├── worker/          # RabbitMQ consumer & Docker sandbox orchestrator
 │   ├── source-fetcher/  # Stage 1: Networked archive acquisition container
 │   ├── scanner-runner/  # Stage 2: Air-gapped OpenGrep + Trivy sandbox container
-│   └── web/             # Next.js observability dashboard
-└── packages/
-    ├── analysis/        # Delta calculation, risk scoring, and GitHub formatters
-    ├── queue/           # RabbitMQ connection manager & channel wrappers
-    ├── database/        # PostgreSQL client & Prisma ORM schemas
-    └── types/           # Shared TypeScript domain contracts
+│   └── web/             # Next.js observability dashboard (UI starter)
+├── packages/
+│   ├── analysis/        # Delta calculation, risk scoring, and GitHub formatters
+│   ├── queue/           # RabbitMQ connection manager & channel wrappers
+│   ├── database/        # PostgreSQL client & Prisma ORM schemas (Planned Phase 6)
+│   └── types/           # Shared TypeScript domain contracts
+└── scripts/
+    └── benchmark.ts     # Pipeline performance and benchmarking runner
 ```
 
 ---
@@ -175,3 +183,25 @@ Invoke-RestMethod -Uri "http://localhost:4000/api/webhooks/github" `
   -Body $payload `
   -ContentType "application/json"
 ```
+
+---
+
+## Performance Benchmarking
+
+ThirdEye includes a built-in benchmarking suite (`scripts/benchmark.ts`) to measure wall-clock durations, scanner execution times (OpenGrep vs. Trivy), filesystem census, and memory usage across sequential and concurrent runs:
+
+```powershell
+# Run default sequential benchmark (3 iterations across Express, Juice Shop, and ThirdEye)
+pnpm benchmark
+
+# Run concurrent benchmark with a worker pool of 3
+pnpm tsx scripts/benchmark.ts --mode=concurrent --concurrency=3 --iterations=3
+
+# Benchmark a specific local or remote repository
+pnpm tsx scripts/benchmark.ts --repo=C:\Users\Hp\Desktop\ThirdEye --iterations=3
+```
+
+Benchmark runs generate:
+- `benchmark-results.json`: Full environment specs, per-run timings, and statistical medians.
+- `benchmark-report.md`: Executive summary table with median durations and min-max ranges.
+- `benchmark-results.csv`: Flattened tabular export for spreadsheets.

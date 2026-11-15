@@ -26,14 +26,16 @@ In software terms:
 =================================================================
   [ ThirdEye Root Folder ]
   ├── apps/
-  │   ├── web/        (Next.js Dashboard)
-  │   ├── api/        (Express REST API)
-  │   └── worker/     (RabbitMQ Commit Processor)
+  │   ├── api/            (Express REST API - Webhook Ingress)
+  │   ├── worker/         (RabbitMQ PR Security Pipeline Orchestrator)
+  │   ├── source-fetcher/ (Stage 1: Container Source Acquisition)
+  │   ├── scanner-runner/ (Stage 2: Air-Gapped OpenGrep + Trivy Runner)
+  │   └── web/            (Next.js Dashboard - UI Starter)
   └── packages/
-      ├── database/   (Prisma / PostgreSQL client)
-      ├── queue/      (RabbitMQ connection & DLQ setup)
-      ├── analysis/   (Commit diff parser engine)
-      └── types/      (Shared TypeScript Interfaces)
+      ├── analysis/       (Security Delta Engine & Deployment Gate Scorer)
+      ├── queue/          (RabbitMQ Topic Exchange & DLQ Connection Manager)
+      ├── database/       (PostgreSQL & Prisma Client - Planned Phase 6)
+      └── types/          (Shared TypeScript Domain Models & Contracts)
 =================================================================
 ```
 
